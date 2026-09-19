@@ -27,18 +27,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
     {
 
         internal WindowsTempFileStream()
-            : base(Path.GetTempFileName(), FileMode.Open, FileAccess.ReadWrite)
+            : base(Path.GetTempFileName(), FileMode.Open, FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose)
         {
 
-        }
-
-        public override void Close()
-        {
-            base.Close();
-            if (File.Exists(this.Name))
-            {
-                File.Delete(this.Name);
-            }
         }
     }
 }

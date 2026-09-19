@@ -52,6 +52,9 @@ namespace Egelke.EHealth.Etee.Crypto
 {
     internal class TripleWrapper : IDataSealer, IDataCompleter, ITmaDataCompleter
     {
+        // BouncyCastle defaults to 1000 byte BER octet chunks
+        private const int StreamBufferSize = 64 * 1024;
+
         private readonly ILogger<TripleWrapper> logger;
 
         private Level level;
@@ -163,7 +166,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
         private ITempStreamFactory NewFactory(Stream stream)
         {
-            return stream.Length > Settings.Default.InMemorySize ? (ITempStreamFactory)new TempFileStreamFactory() : (ITempStreamFactory)new MemoryStreamFactory();
+            return stream.Length > Settings.Default.InMemorySize ? (ITempStreamFactory)new TempFileStreamFactory() : (ITempStreamFactory)new MemoryStreamFactory(stream.Length);
         }
 
         private X509Certificate2[] ConverToX509Certificates(EncryptionToken[] tokens)
@@ -335,6 +338,7 @@ namespace Egelke.EHealth.Etee.Crypto
             logger?.LogInformation("Encrypting message for {0} known and {1} unknown recipient",
                 certs == null ? 0 : certs.Count, key == null ? 0 : 1);
             CmsEnvelopedDataStreamGenerator encryptGenerator = new CmsEnvelopedDataStreamGenerator();
+            encryptGenerator.SetBufferSize(StreamBufferSize);
             if (certs != null)
             {
                 foreach (X509Certificate2 cert in certs)
@@ -379,6 +383,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
             //Create the objects we need
             var gen = new CmsSignedDataStreamGenerator();
+            gen.SetBufferSize(StreamBufferSize);
             var parser = new CmsSignedDataParser(signed);
             timemarkKey = new TimemarkKey();
 

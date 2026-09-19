@@ -201,7 +201,7 @@ namespace Egelke.EHealth.Etee.Crypto
             logger?.LogInformation("Unsealing message of {0} bytes for {1} recipient with level {2}", sealedData.Length, key == null ? "known" : "unknown", this.level);
             UnsealResult result = new UnsealResult();
             result.SecurityInformation = new UnsealSecurityInformation();
-            ITempStreamFactory factory = streaming && sealedData.Length > Settings.Default.InMemorySize ? (ITempStreamFactory)new TempFileStreamFactory() : (ITempStreamFactory)new MemoryStreamFactory();
+            ITempStreamFactory factory = streaming && sealedData.Length > Settings.Default.InMemorySize ? (ITempStreamFactory)new TempFileStreamFactory() : (ITempStreamFactory)new MemoryStreamFactory(sealedData.Length);
 
             Stream verified = factory.CreateNew();
             using (verified)

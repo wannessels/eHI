@@ -155,7 +155,10 @@ namespace Egelke.EHealth.Client.Services
                         )
                 );
             }
-            return EncryptForService(ToMemoryStream(ToXmlElement(ekc)), Level.B_Level);
+            using (var clear = ToMemoryStream(ekc))
+            {
+                return EncryptForService(clear, Level.B_Level);
+            }
         }
 
         protected byte[] DecryptForKnown(byte[] cypherText, out string contentType)

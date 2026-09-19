@@ -117,21 +117,31 @@ namespace Egelke.EHealth.Client.Services
             return xmlDoc.DocumentElement;
         }
 
+        private static readonly XmlWriterSettings SerializeSettings = new XmlWriterSettings
+        {
+            Encoding = new UTF8Encoding(false), // Disable BOM
+            Indent = true,                      // Optional: pretty print
+            OmitXmlDeclaration = false,         // Include XML declaration
+            IndentChars = "  ",
+            NewLineHandling = NewLineHandling.Replace
+        };
+
         protected MemoryStream ToMemoryStream(XmlElement el)
         {
-            var stream = new MemoryStream();
-            var settings = new XmlWriterSettings
-            {
-                Encoding = new UTF8Encoding(false), // Disable BOM
-                Indent = true,                      // Optional: pretty print
-                OmitXmlDeclaration = false,         // Include XML declaration
-                IndentChars = "  ",
-                NewLineHandling = NewLineHandling.Replace
-            };
-            using (var writer = XmlWriter.Create(stream, settings))
-            {
-                el.WriteTo(writer);
+            return ToMemoryStream(writer => el.WriteTo(writer));
+        }
 
+        protected MemoryStream ToMemoryStream(XDocument doc)
+        {
+            return ToMemoryStream(writer => doc.Save(writer));
+        }
+
+        private static MemoryStream ToMemoryStream(Action<XmlWriter> write)
+        {
+            var stream = new MemoryStream();
+            using (var writer = XmlWriter.Create(stream, SerializeSettings))
+            {
+                write(writer);
             }
             stream.Position = 0;
 
@@ -175,11 +185,16 @@ namespace Egelke.EHealth.Client.Services
             var senderFactory = new DataSealerFactory();
             var sender = senderFactory.Create(level, base.ClientCredentials.ClientCertificate.Certificate);
 
-            Stream cypherStream = sender.Seal(clearStream, recepients);
+            using (Stream cypherStream = sender.Seal(clearStream, recepients))
+            {
+                return ToByteArray(cypherStream);
+            }
+        }
 
-            byte[] cypherBytes = new BinaryReader(cypherStream).ReadBytes((int)cypherStream.Length);
-
-            return cypherBytes;
+        private static byte[] ToByteArray(Stream stream)
+        {
+            if (stream is MemoryStream memoryStream && memoryStream.Position == 0) return memoryStream.ToArray();
+            return new BinaryReader(stream).ReadBytes((int)(stream.Length - stream.Position));
         }
 
         protected ClearType Decrypt<ClearType>(byte[] cypherText) where ClearType : class
@@ -207,9 +222,9 @@ namespace Egelke.EHealth.Client.Services
                 case Type ct when ct == typeof(Stream):
                     return result.UnsealedData as ClearType;
                 case Type ct when ct == typeof(byte[]):
-                    return new BinaryReader(result.UnsealedData).ReadBytes((int)result.UnsealedData.Length) as ClearType;
+                    using (result.UnsealedData) return ToByteArray(result.UnsealedData) as ClearType;
                 case Type ct when ct == typeof(XmlElement):
-                    return ToXmlElement(result.UnsealedData) as ClearType;
+                    using (result.UnsealedData) return ToXmlElement(result.UnsealedData) as ClearType;
                 default:
                     throw new NotImplementedException("Clear text type not supported yet");
             }

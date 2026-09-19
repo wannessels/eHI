@@ -25,11 +25,23 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
 {
     internal class MemoryStreamFactory : ITempStreamFactory
     {
+        private const int Overhead = 16 * 1024;
 
+        private readonly int capacity;
+
+        public MemoryStreamFactory()
+        {
+            capacity = 0;
+        }
+
+        public MemoryStreamFactory(long sizeHint)
+        {
+            capacity = (int)Math.Min(sizeHint + Overhead, int.MaxValue);
+        }
 
         public Stream CreateNew()
         {
-            return new MemoryStream();
+            return new MemoryStream(capacity);
         }
 
     }
