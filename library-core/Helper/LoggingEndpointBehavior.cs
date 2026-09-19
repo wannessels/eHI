@@ -36,6 +36,11 @@ namespace Egelke.EHealth.Client.Helper
     {
         private readonly ILogger _logger;
 
+        /// <summary>Explicitly enables body logging at Trace level.</summary>
+        public bool LogBodies { get; set; }
+        /// <summary>Maximum formatted body characters.</summary>
+        public int MaxBodyCharacters { get; set; } = 4096;
+
         /// <summary>
         /// Default constructor.
         /// </summary>
@@ -66,7 +71,8 @@ namespace Egelke.EHealth.Client.Helper
         /// <param name="clientRuntime">The client runtime, not used</param>
         public void ApplyClientBehavior(ServiceEndpoint endpoint, ClientRuntime clientRuntime)
         {
-            clientRuntime.ClientMessageInspectors.Add(new LoggingMessageInspector(_logger));
+            clientRuntime.ClientMessageInspectors.Add(new LoggingMessageInspector(_logger)
+            { LogBodies = LogBodies, MaxBodyCharacters = MaxBodyCharacters });
         }
 
         /// <summary>

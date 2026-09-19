@@ -71,6 +71,11 @@ namespace Egelke.EHealth.Client
         /// </summary>
         public IMemoryCache Cache { get; set; }
 
+        /// <summary>Explicitly enables signed SOAP body logging at Trace level.</summary>
+        public bool LogMessageBodies { get; set; }
+        /// <summary>Maximum formatted signed message characters.</summary>
+        public int MaxLoggedBodyCharacters { get; set; } = 4096;
+
         /// <summary>
         /// WS-Security version, default to 1.1
         /// </summary>

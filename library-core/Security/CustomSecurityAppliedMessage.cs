@@ -188,15 +188,9 @@ namespace Egelke.EHealth.Client.Security
             env.Save(writer);
 
             //log the signed message when required
-            if (_logger != null && _logger.IsEnabled(LogLevel.Trace))
+            if (Security?.LogMessageBodies == true && _logger?.IsEnabled(LogLevel.Trace) == true)
             {
-                using (var memStream = new MemoryStream())
-                {
-                    env.Save(memStream);
-                    memStream.Position = 0;
-                    var str = new StreamReader(memStream).ReadToEnd();
-                    _logger.LogTrace(message: str);
-                }
+                _logger.LogTrace("Signed SOAP body: {Body}", MessageLogFormatter.Format(env.WriteTo, Security.MaxLoggedBodyCharacters));
             }
         }
 

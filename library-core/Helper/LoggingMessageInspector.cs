@@ -34,9 +34,13 @@ namespace Egelke.EHealth.Client.Helper
     public class LoggingMessageInspector : IClientMessageInspector
     {
 
-        XmlWriterSettings _settings;
-
         private readonly ILogger _logger;
+
+        /// <summary>Explicitly opts in to SOAP body logging at Trace. Off by default.</summary>
+        public bool LogBodies { get; set; }
+
+        /// <summary>Maximum formatted body characters. Opt-in tracing still buffers the transport message.</summary>
+        public int MaxBodyCharacters { get; set; } = 4096;
 
         /// <summary>
         /// Default constructor
@@ -46,14 +50,6 @@ namespace Egelke.EHealth.Client.Helper
         {
             _logger = logger;
 
-            _settings = new XmlWriterSettings
-            {
-                Indent = true,
-                IndentChars = "  ", // Two spaces
-                NewLineOnAttributes = true,
-                NewLineHandling = NewLineHandling.Entitize,
-                OmitXmlDeclaration = false
-            };
 
         }
         
@@ -64,13 +60,7 @@ namespace Egelke.EHealth.Client.Helper
         /// <param name="correlationState">correlation state, not used</param>
         public void AfterReceiveReply(ref Message reply, object correlationState)
         {
-            if (!_logger.IsEnabled(LogLevel.Information)) return;
-
-            var buffer = reply.CreateBufferedCopy(int.MaxValue);
-            var copy = buffer.CreateMessage();
-            reply = buffer.CreateMessage();
-
-            _logger.LogInformation("SOAP Response:\n{0}", MessageToString(copy));
+            LogMessage(ref reply, "Response");
         }
 
         /// <summary>
@@ -81,24 +71,26 @@ namespace Egelke.EHealth.Client.Helper
         /// <returns>a clone of the request, unaltered</returns>
         public object BeforeSendRequest(ref Message request, IClientChannel channel)
         {
-            if (!_logger.IsEnabled(LogLevel.Information)) return null;
-
-            var buffer = request.CreateBufferedCopy(int.MaxValue);
-            var copy = buffer.CreateMessage();
-            request = buffer.CreateMessage(); // Reset original
-
-            _logger.LogInformation("SOAP Request:\n{0}", MessageToString(copy));
+            LogMessage(ref request, "Request");
             return null;
         }
 
-        private string MessageToString(Message message)
+        private void LogMessage(ref Message message, string direction)
         {
-            var sw = new StringWriter();
-            using (var writer = XmlWriter.Create(sw, _settings))
+            if (_logger?.IsEnabled(LogLevel.Information) == true)
+                _logger.LogInformation("SOAP {Direction}: action={Action}, messageId={MessageId}, isFault={IsFault}",
+                    direction, message.Headers.Action, message.Headers.MessageId, message.IsFault);
+            if (!LogBodies || _logger?.IsEnabled(LogLevel.Trace) != true) return;
+            if (MaxBodyCharacters < 1) throw new ArgumentOutOfRangeException(nameof(MaxBodyCharacters));
+
+            var original = message;
+            using (var buffer = original.CreateBufferedCopy(int.MaxValue))
             {
-                message.WriteMessage(writer);
+                message = buffer.CreateMessage();
+                original.Close();
+                using (var copy = buffer.CreateMessage())
+                    _logger.LogTrace("SOAP {Direction} body: {Body}", direction, MessageLogFormatter.Format(copy.WriteMessage, MaxBodyCharacters));
             }
-            return sw.ToString();
         }
 
     }
