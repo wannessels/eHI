@@ -119,9 +119,12 @@ namespace Egelke.EHealth.Client.Services
                     throw new NotImplementedException("encryption is not yet supported");
             }
 
-            _logger?.LogDebug("Recieved respronse for {0}: {1}",
-                rsp.CommonOutput.InputReference,
-                Encoding.UTF8.GetString(rspBody));
+            if (_logger?.IsEnabled(LogLevel.Debug) == true)
+            {
+                _logger.LogDebug("Received response for {0}: {1}",
+                    rsp.CommonOutput.InputReference,
+                    Encoding.UTF8.GetString(rspBody));
+            }
 
             switch (typeof(Response))
             {

@@ -125,7 +125,7 @@ namespace Egelke.EHealth.Client.Pki
             if (webResponse.StatusCode != HttpStatusCode.OK
                 || webResponse.Content?.Headers.ContentType?.MediaType != "application/timestamp-reply")
             {
-                trace.TraceEvent(TraceEventType.Error, 0, "Invalid http status or content for time-stamp reply: " + webResponse.ReasonPhrase);
+                trace.TraceEvent(TraceEventType.Error, 0, "Invalid http status or content for time-stamp reply: {0}", webResponse.ReasonPhrase);
                 throw new ApplicationException("Response with invalid status or content type of the TSA: " + webResponse.ReasonPhrase);
             }
         }
@@ -133,7 +133,8 @@ namespace Egelke.EHealth.Client.Pki
         private byte[] ParseRfc3161ResponseBody(byte[] rspBody, TimeStampRequest tspr)
         {
             TimeStampResponse tsResponse = new TimeStampResponse(rspBody);
-            trace.TraceData(TraceEventType.Verbose, 0, "retrieved time-stamp response", address.ToString(), Convert.ToBase64String(tsResponse.GetEncoded()));
+            if (trace.Switch.ShouldTrace(TraceEventType.Verbose))
+                trace.TraceData(TraceEventType.Verbose, 0, "retrieved time-stamp response", address.ToString(), Convert.ToBase64String(rspBody));
 
             try
             {

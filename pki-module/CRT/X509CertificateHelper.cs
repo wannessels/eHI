@@ -527,7 +527,7 @@ namespace Egelke.EHealth.Client.Pki
             if (webRsp.StatusCode != HttpStatusCode.OK
                 || webRsp.Content?.Headers.ContentType?.MediaType != "application/ocsp-response")
             {
-                trace.TraceEvent(TraceEventType.Error, 0, "Invalid http status or contentype for ocsp response: " + webRsp.ReasonPhrase);
+                trace.TraceEvent(TraceEventType.Error, 0, "Invalid http status or contentype for ocsp response: {0}", webRsp.ReasonPhrase);
                 throw new RevocationUnknownException("Response with invalid status or contenttype for ocsp response: " + webRsp.ReasonPhrase);
             }
         }
@@ -578,7 +578,7 @@ namespace Egelke.EHealth.Client.Pki
         {
             if (webRsp.StatusCode != HttpStatusCode.OK)
             {
-                trace.TraceEvent(TraceEventType.Error, 0, "Invalid http status for crl reply: " + webRsp.ReasonPhrase);
+                trace.TraceEvent(TraceEventType.Error, 0, "Invalid http status for crl reply: {0}", webRsp.ReasonPhrase);
                 throw new RevocationUnknownException("Response with invalid status the crl reply: " + webRsp.ReasonPhrase);
             }
         }

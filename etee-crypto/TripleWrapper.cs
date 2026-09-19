@@ -181,7 +181,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
         private Stream Seal(ITempStreamFactory factory, Stream unsealedStream, SecretKey skey, X509Certificate2[] certs, WebKey[] webKeys)
         {
-            logger?.LogInformation("Sealing message of {0} bytes for {1}/{2} known recipients and {3} unknown recipients to level {3}",
+            logger?.LogInformation("Sealing message of {0} bytes for {1}/{2} known recipients and {3} unknown recipients to level {4}",
                 unsealedStream.Length, certs?.Length, webKeys?.Length, skey == null ? 0 : 1, this.level);
 
             using (
@@ -236,7 +236,7 @@ namespace Egelke.EHealth.Etee.Crypto
                     {
                         if (retry++ < 4)
                         {
-                            logger?.LogWarning("Failed to put outer signature, staring loop: {0}", ce);
+                            logger?.LogWarning(ce, "Failed to put outer signature, starting retry {0}", retry);
                             System.Threading.Thread.Sleep((int)Math.Pow(10, retry));
                         }
                         else
@@ -345,7 +345,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 {
                     BC::X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
                     encryptGenerator.AddKeyTransRecipient(bcCert);
-                    logger?.LogDebug("Added known recipient: {0} ({1})", bcCert.SubjectDN.ToString(), bcCert.IssuerDN.ToString());
+                    logger?.LogDebug("Added known recipient: {0} ({1})", bcCert.SubjectDN, bcCert.IssuerDN);
                 }
             }
             if (key != null)
@@ -424,7 +424,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
             if (timemarkKey.SigningTime == default && tst != null)
             {
-                logger?.LogInformation("Implicit signing time is replaced with time-stamp time {1}", tst.TimeStampInfo.GenTime);
+                logger?.LogInformation("Implicit signing time is replaced with time-stamp time {0}", tst.TimeStampInfo.GenTime);
                 timemarkKey.SigningTime = tst.TimeStampInfo.GenTime;
             }
 
@@ -596,7 +596,8 @@ namespace Egelke.EHealth.Etee.Crypto
         {
             SHA256 sha = SHA256.Create();
             byte[] signatureHash = sha.ComputeHash(timemarkKey.SignatureValue);
-            logger?.LogDebug("SHA-256 hashed the signature value from {0} to {1}", Convert.ToBase64String(timemarkKey.SignatureValue), Convert.ToBase64String(signatureHash));
+            if (logger?.IsEnabled(LogLevel.Debug) == true)
+                logger.LogDebug("SHA-256 hashed the signature value from {0} to {1}", Convert.ToBase64String(timemarkKey.SignatureValue), Convert.ToBase64String(signatureHash));
 
             byte[] rawTst = timestampProvider.GetTimestampFromDocumentHash(signatureHash, "http://www.w3.org/2001/04/xmlenc#sha256");
             TimeStampToken tst = rawTst.ToTimeStampToken();
@@ -617,7 +618,8 @@ namespace Egelke.EHealth.Etee.Crypto
             byte[] rawTst = tst.GetEncoded();
             BC.Asn1.Cms.Attribute signatureTstAttr = new BC::Asn1.Cms.Attribute(PkcsObjectIdentifiers.IdAASignatureTimeStampToken, new DerSet(Asn1Object.FromByteArray(rawTst)));
             unsignedAttributes[signatureTstAttr.AttrType] = signatureTstAttr;
-            logger?.LogDebug("Added the time-stamp {0} [Token={1}]", tst.TimeStampInfo.GenTime, Convert.ToBase64String(rawTst));
+            if (logger?.IsEnabled(LogLevel.Debug) == true)
+                logger.LogDebug("Added the time-stamp {0} [Token={1}]", tst.TimeStampInfo.GenTime, Convert.ToBase64String(rawTst));
         }
 
         private RevocationValues GetRevocationValues(TimemarkKey timemarkKey, IStore<BC::X509.X509Certificate> embeddedCerts, RevocationValues revocationInfo)

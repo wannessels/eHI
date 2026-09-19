@@ -355,7 +355,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
                 //Getting the first certificate
                 signerCert = signerCerts.Current;
-                logger?.LogDebug("Found the signer certificate: {0}", signerCert.SubjectDN.ToString());
+                logger?.LogDebug("Found the signer certificate: {0}", signerCert.SubjectDN);
 
                 //Check if the outer certificate matches the inner certificate
                 if (outer != null)
@@ -409,7 +409,7 @@ namespace Egelke.EHealth.Etee.Crypto
                     result.Subject = outer.Subject;
                     result.SubjectId = outer.SignerId;
                     signerCert = outer.Signer != null ? DotNetUtilities.FromX509Certificate(outer.Signer) : null;
-                    logger?.LogDebug("An already validated certificates was provided: {0}", signerCert?.SubjectDN.ToString());
+                    logger?.LogDebug("An already validated certificates was provided: {0}", signerCert?.SubjectDN);
                 }
 
             }
@@ -497,8 +497,10 @@ namespace Egelke.EHealth.Etee.Crypto
                     Org.BouncyCastle.Asn1.Cms.Attribute tstList = signerInfo.UnsignedAttributes[PkcsObjectIdentifiers.IdAASignatureTimeStampToken];
                     if (tstList != null && tstList.AttrValues.Count > 0)
                     {
-                        logger?.LogDebug("The CMS message contains the Signature Time Stamp Token: {0}", Convert.ToBase64String(tstList.AttrValues[0].GetEncoded()));
-                        tst = tstList.AttrValues[0].GetEncoded().ToTimeStampToken();
+                        byte[] rawTst = tstList.AttrValues[0].GetEncoded();
+                        if (logger?.IsEnabled(LogLevel.Debug) == true)
+                            logger.LogDebug("The CMS message contains the Signature Time Stamp Token: {0}", Convert.ToBase64String(rawTst));
+                        tst = rawTst.ToTimeStampToken();
                     }
                 }
 
