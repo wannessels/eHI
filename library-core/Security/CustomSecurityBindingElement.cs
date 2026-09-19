@@ -135,7 +135,8 @@ namespace Egelke.EHealth.Client.Security
                 MessageSecurityVersion = this.MessageSecurityVersion,
                 SignParts = this.SignParts,
                 Security = this._security,
-                Tracing = this.Tracing
+                Tracing = this.Tracing,
+                SendTimeout = context.Binding.SendTimeout
             };
         }
     }

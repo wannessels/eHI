@@ -82,6 +82,9 @@ namespace Egelke.EHealth.Client.Security
         /// </summary>
         public EndpointAddress RemoteAddress { get; set; }
 
+        /// <summary>Token acquired before serialization. Serialization never contacts the STS.</summary>
+        public GenericXmlSecurityToken PreparedToken { get; set; }
+
         /// <inheritdoc/>
         public override bool IsEmpty
         {
@@ -178,10 +181,7 @@ namespace Egelke.EHealth.Client.Security
             //see https://github.com/dotnet/wcf/blob/main/src/System.ServiceModel.Primitives/src/System/IdentityModel/Tokens/SecurityTokenTypes.cs
             //see https://github.com/dotnet/wcf/blob/main/src/System.ServiceModel.Primitives/src/System/ServiceModel/Security/ClientCredentialsSecurityTokenManager.cs#L86
 
-            var requirement = Security.ToTokenRequirement(RemoteAddress);
-            var tokenManager = ClientCredentials.CreateSecurityTokenManager();
-            var provider = tokenManager.CreateSecurityTokenProvider(requirement);
-            var token = provider.GetToken(TimeSpan.FromSeconds(5)) as GenericXmlSecurityToken;
+            var token = PreparedToken ?? throw new InvalidOperationException("Acquire and assign PreparedToken before serializing the message");
             wss.ApplyOnRequest(ref header, bodyIdValue, token, SignParts);
 
             //Write the modified version with security header to the original streams.

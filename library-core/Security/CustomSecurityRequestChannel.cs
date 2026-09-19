@@ -26,6 +26,8 @@ using System.ServiceModel.Description;
 using System.ServiceModel.Security;
 using System.Text;
 using System.Xml;
+using System.IdentityModel.Tokens;
+using System.Threading.Tasks;
 
 namespace Egelke.EHealth.Client.Security
 {
@@ -77,6 +79,9 @@ namespace Egelke.EHealth.Client.Security
         /// Tracing information to use
         /// </summary>
         public TracingConfig Tracing {  get; set; }
+
+        /// <summary>Default deadline, including token acquisition and transport.</summary>
+        public TimeSpan SendTimeout { get; set; } = TimeSpan.FromMinutes(1);
 
         /// <summary>
         /// Final destination.
@@ -270,7 +275,7 @@ namespace Egelke.EHealth.Client.Security
         /// <returns>the received response</returns>
         public Message Request(Message message)
         {
-            return Verify(_innerChannel.Request(Wrap(message)));
+            return Request(message, SendTimeout);
         }
 
         /// <summary>
@@ -284,7 +289,7 @@ namespace Egelke.EHealth.Client.Security
         /// <returns>the received response</returns>
         public Message Request(Message message, TimeSpan timeout)
         {
-            return Verify(_innerChannel.Request(Wrap(message), timeout));
+            return RequestAsync(message, timeout).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -299,7 +304,7 @@ namespace Egelke.EHealth.Client.Security
         /// <returns>the async result</returns>
         public IAsyncResult BeginRequest(Message message, AsyncCallback callback, object state)
         {
-            return _innerChannel.BeginRequest(Wrap(message), callback, state);
+            return BeginRequest(message, SendTimeout, callback, state);
         }
 
         /// <summary>
@@ -315,7 +320,7 @@ namespace Egelke.EHealth.Client.Security
         /// <returns>the async result</returns>
         public IAsyncResult BeginRequest(Message message, TimeSpan timeout, AsyncCallback callback, object state)
         {
-            return _innerChannel.BeginRequest(Wrap(message), timeout, callback, state);
+            return TaskApm.Begin(RequestAsync(message, timeout), callback, state);
         }
 
         /// <summary>
@@ -328,10 +333,31 @@ namespace Egelke.EHealth.Client.Security
         /// <returns>The receive response</returns>
         public Message EndRequest(IAsyncResult result)
         {
-            return Verify(_innerChannel.EndRequest(result));
+            return ((Task<Message>)result).GetAwaiter().GetResult();
         }
 
-        private Message Wrap(Message message)
+        private async Task<Message> RequestAsync(Message message, TimeSpan timeout)
+        {
+            var deadline = new RequestDeadline(timeout);
+            var token = await RequestDeadline.WaitAsync(AcquireTokenAsync(deadline.Remaining), deadline.Remaining).ConfigureAwait(false);
+            var wrapped = Wrap(message, token);
+            var response = await Task<Message>.Factory.FromAsync(
+                (callback, state) => _innerChannel.BeginRequest(wrapped, deadline.Remaining, callback, state),
+                _innerChannel.EndRequest, null).ConfigureAwait(false);
+            return Verify(response);
+        }
+
+        /// <summary>Acquires security credentials without blocking the serialization path.</summary>
+        protected virtual Task<GenericXmlSecurityToken> AcquireTokenAsync(TimeSpan timeout)
+        {
+            var requirement = Security.ToTokenRequirement(RemoteAddress);
+            var provider = ClientCredentials.CreateSecurityTokenManager().CreateSecurityTokenProvider(requirement);
+            if (!(provider is CustomSecurityTokenProvider custom))
+                throw new InvalidOperationException("CustomSecurityTokenProvider is required for asynchronous token preparation");
+            return custom.PrepareTokenAsync(timeout);
+        }
+
+        private Message Wrap(Message message, GenericXmlSecurityToken token)
         {
             if (Tracing != null) {
                 var httpRequest = new HttpRequestMessageProperty();
@@ -349,7 +375,8 @@ namespace Egelke.EHealth.Client.Security
                 MessageSecurityVersion = this.MessageSecurityVersion,
                 SignParts = this.SignParts,
                 RemoteAddress = this.RemoteAddress,
-                Security = this.Security
+                Security = this.Security,
+                PreparedToken = token
             };
         }
 

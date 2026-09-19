@@ -28,6 +28,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Serialization;
+using System.Threading.Tasks;
 using Egelke.EHealth.Client.Helper;
 using Egelke.EHealth.Client.Sts.WsTrust200512.Error;
 using Microsoft.Extensions.Logging;
@@ -50,6 +51,10 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
         [ServiceKnownType(typeof(EncryptedType))]
         Message RequestSecurityToken(RequestSecurityTokenRequest request);
 
+        /// <summary>Requests a token asynchronously.</summary>
+        [OperationContract(Action = "urn:be:fgov:ehealth:sts:protocol:v1:RequestSecurityToken", ReplyAction = "*")]
+        Task<Message> RequestSecurityTokenAsync(RequestSecurityTokenRequest request);
+
         /// <summary>
         /// provide the Challenge for a HOK token.
         /// </summary>
@@ -59,6 +64,10 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
         [XmlSerializerFormat(SupportFaults = true)]
         [ServiceKnownType(typeof(EncryptedType))]
         Message Challenge(RequestSecurityTokenResponse request);
+
+        /// <summary>Answers a holder-of-key challenge asynchronously.</summary>
+        [OperationContract(Action = "urn:be:fgov:ehealth:sts:protocol:v1:Challenge", ReplyAction = "*")]
+        Task<Message> ChallengeAsync(RequestSecurityTokenResponse request);
 
 
     }
@@ -118,6 +127,10 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
         /// <param name="previousTicket">previous ticket</param>
         /// <returns>new ticket as Xml Dom element</returns>
         public XmlElement RenewTicket(X509Certificate2 sessionCert, XmlElement previousTicket)
+            => RenewTicketAsync(sessionCert, previousTicket).ConfigureAwait(false).GetAwaiter().GetResult();
+
+        /// <summary>Renews a ticket, including any challenge, within one deadline.</summary>
+        public Task<XmlElement> RenewTicketAsync(X509Certificate2 sessionCert, XmlElement previousTicket, TimeSpan? timeout = null)
         {
             //make the request
             var request = new RequestSecurityTokenRequest()
@@ -140,7 +153,7 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
                 }
             };
 
-            return Send(sessionCert, request);
+            return SendAsync(sessionCert, request, new RequestDeadline(timeout ?? Endpoint.Binding.SendTimeout));
         }
 
         /// <summary>
@@ -165,6 +178,18 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
         /// <param name="claims">claims to add to the request</param>
         /// <returns>new ticket as Xml Dom element (challanges are handled internally)</returns>
         public XmlElement RequestTicket(X509Certificate2 sessionCert, DateTime notBefore, DateTime notOnOrAfter, AuthClaimSet claims)
+            => SendAsync(sessionCert, CreateIssueRequest(sessionCert, notBefore, notOnOrAfter, claims),
+                new RequestDeadline(Endpoint.Binding.SendTimeout)).ConfigureAwait(false).GetAwaiter().GetResult();
+
+        /// <summary>Issues a ticket, including any challenge, within one deadline.</summary>
+        public Task<XmlElement> RequestTicketAsync(X509Certificate2 sessionCert, TimeSpan duration, AuthClaimSet claims, TimeSpan? timeout = null)
+        {
+            var now = DateTime.UtcNow;
+            return SendAsync(sessionCert, CreateIssueRequest(sessionCert, now, now.Add(duration), claims),
+                new RequestDeadline(timeout ?? Endpoint.Binding.SendTimeout));
+        }
+
+        private static RequestSecurityTokenRequest CreateIssueRequest(X509Certificate2 sessionCert, DateTime notBefore, DateTime notOnOrAfter, AuthClaimSet claims)
         {
             var useKey = sessionCert == null ? null : new UseKeyType
             {
@@ -213,19 +238,21 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
             };
 
             //send it
-            return Send(sessionCert, request);
+            return request;
         }
 
-        private XmlElement Send(X509Certificate2 sessionCert, RequestSecurityTokenRequest request)
+        private async Task<XmlElement> SendAsync(X509Certificate2 sessionCert, RequestSecurityTokenRequest request, RequestDeadline deadline)
         {
-            Message responseMsg = base.Channel.RequestSecurityToken(request);
+            InnerChannel.OperationTimeout = deadline.Remaining;
+            using (Message responseMsg = await Channel.RequestSecurityTokenAsync(request).ConfigureAwait(false))
+            {
             ValidateMessage(responseMsg);
             
             var responseBody = new XmlDocument
             {
                 PreserveWhitespace = true
             };
-            responseBody.Load(responseMsg.GetReaderAtBodyContents());
+            using (var reader = responseMsg.GetReaderAtBodyContents()) responseBody.Load(reader);
 
             XmlNodeList assertions = responseBody.GetElementsByTagName("Assertion", "urn:oasis:names:tc:SAML:1.0:assertion");
             if (assertions.Count == 1)
@@ -235,14 +262,16 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
             }
             else
             {
-                var reader = new XmlNodeReader(responseBody);
-                var responseObject = (RequestSecurityTokenResponseType)ChallengeSerializer.Deserialize(reader);
-                return ProcessChallenge(sessionCert, responseObject);
+                RequestSecurityTokenResponseType responseObject;
+                using (var reader = new XmlNodeReader(responseBody))
+                    responseObject = (RequestSecurityTokenResponseType)ChallengeSerializer.Deserialize(reader);
+                return await ProcessChallengeAsync(sessionCert, responseObject, deadline).ConfigureAwait(false);
+            }
             }
         }
 
 
-        private XmlElement ProcessChallenge(X509Certificate2 sessionCert, RequestSecurityTokenResponseType response)
+        private async Task<XmlElement> ProcessChallengeAsync(X509Certificate2 sessionCert, RequestSecurityTokenResponseType response, RequestDeadline deadline)
         {
             //we expect SignChallenge, which we need to return as SignChallengeResponse using the body cert/key.
             if (response.SignChallenge == null) throw new InvalidOperationException("eHealth WS-Trust service didn't return sign challenge response");
@@ -251,28 +280,44 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
 
             //create a secondary channel with new credentails to send the challenge
             ChannelFactory<IWsTrustPortFixed> channelFactory = new ChannelFactory<IWsTrustPortFixed>(base.Endpoint.Binding, base.Endpoint.Address);
+            IClientChannel channel = null;
             try
             {
                 channelFactory.Credentials.ClientCertificate.Certificate = sessionCert;
                 IWsTrustPortFixed secondary = channelFactory.CreateChannel();
+                channel = (IClientChannel)secondary;
+                channel.OperationTimeout = deadline.Remaining;
 
                 //send the (signed) Challenge, get the reponse as message to not break the internal signature
-                Message responseMsg = secondary.Challenge(new RequestSecurityTokenResponse() { RequestSecurityTokenResponse1 = response });
+                using (Message responseMsg = await secondary.ChallengeAsync(new RequestSecurityTokenResponse() { RequestSecurityTokenResponse1 = response }).ConfigureAwait(false))
+                {
                 ValidateMessage(responseMsg);
 
                 var responseBody = new XmlDocument
                 {
                     PreserveWhitespace = true
                 };
-                responseBody.Load(responseMsg.GetReaderAtBodyContents());
+                using (var reader = responseMsg.GetReaderAtBodyContents()) responseBody.Load(reader);
 
                 //TODO::check if correcty wrapped, but for now we do not care.
                 return (XmlElement)responseBody.GetElementsByTagName("Assertion", "urn:oasis:names:tc:SAML:1.0:assertion")[0];
+                }
             }
             finally
             {
-                CloseOrAbort(channelFactory);
+                if (channel != null) await CloseOrAbortAsync(channel, deadline).ConfigureAwait(false);
+                await CloseOrAbortAsync(channelFactory, deadline).ConfigureAwait(false);
             }
+        }
+
+        internal static async Task CloseOrAbortAsync(ICommunicationObject channel, RequestDeadline deadline)
+        {
+            try
+            {
+                if (channel.State == CommunicationState.Faulted) channel.Abort();
+                else await Task.Factory.FromAsync((callback, state) => channel.BeginClose(deadline.Remaining, callback, state), channel.EndClose, null).ConfigureAwait(false);
+            }
+            catch { channel.Abort(); }
         }
 
         internal static void CloseOrAbort(ICommunicationObject communicationObject)

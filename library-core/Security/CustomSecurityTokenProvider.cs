@@ -1,4 +1,4 @@
-﻿/*
+/*
  *  This file is part of eH-I.
  *  Copyright (C) 2025 Egelke BVBA
  *
@@ -17,7 +17,9 @@
  */
 
 using System;
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
+using Egelke.EHealth.Client.Pki;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IdentityModel.Policy;
@@ -50,7 +52,7 @@ namespace Egelke.EHealth.Client.Security
 
         private readonly X509Certificate2 _idCert;
 
-        private static readonly ConcurrentDictionary<string, object> _tokenLocks = new ConcurrentDictionary<string, object>();
+        private static readonly ConditionalWeakTable<IMemoryCache, AsyncSingleFlight<string, SecurityToken>> flights = new ConditionalWeakTable<IMemoryCache, AsyncSingleFlight<string, SecurityToken>>();
 
         /// <summary>
         /// Default constructor.
@@ -149,51 +151,64 @@ namespace Egelke.EHealth.Client.Security
         /// <returns>The generic xml version of the token</returns>
         protected SecurityToken GetSamlHokToken(TimeSpan timeout)
         {
-            var tokenId = _tokenParams.ToId(_idCert);
-            var token = _tokenParams.Cache.Get<SecurityToken>(tokenId);
-            if (IsUsable(token)) return token;
+            return GetSamlHokTokenAsync(timeout).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
 
-            // single flight: concurrent callers for the same identity wait for one STS round trip
-            lock (_tokenLocks.GetOrAdd(tokenId, _ => new object()))
+        /// <summary>Prepares a token before WCF serializes the message.</summary>
+        public async Task<GenericXmlSecurityToken> PrepareTokenAsync(TimeSpan timeout)
+        {
+            switch (_tokenRequirement.TokenType)
             {
-                token = _tokenParams.Cache.Get<SecurityToken>(tokenId);
-                if (IsUsable(token)) return token;
+                case "http://schemas.microsoft.com/ws/2006/05/identitymodel/tokens/X509Certificate":
+                    return (GenericXmlSecurityToken)CreateX509CertificateToken();
+                case "http://schemas.microsoft.com/ws/2006/05/identitymodel/tokens/Saml":
+                    return (GenericXmlSecurityToken)await GetSamlHokTokenAsync(timeout).ConfigureAwait(false);
+                default:
+                    throw new NotSupportedException("Requested token type " + _tokenRequirement.TokenType + " not supported");
+            }
+        }
 
-                if (token == null)
-                    token = CreateSamlHokToken(timeout);
-                else
-                    token = RenewSamlHokToken(token, timeout);
-                _tokenParams.Cache.Set(tokenId, token, new MemoryCacheEntryOptions()
+        private Task<SecurityToken> GetSamlHokTokenAsync(TimeSpan timeout)
+        {
+            var cache = _tokenParams.Cache;
+            var tokenId = _tokenParams.ToId(_idCert);
+            var token = cache.Get<SecurityToken>(tokenId);
+            if (IsUsable(token)) return Task.FromResult(token);
+            var flight = flights.GetValue(cache, _ => new AsyncSingleFlight<string, SecurityToken>());
+            return RequestDeadline.WaitAsync(flight.RunAsync(tokenId, async () =>
+            {
+                token = cache.Get<SecurityToken>(tokenId);
+                if (IsUsable(token)) return token;
+                token = token == null
+                    ? await CreateSamlHokTokenAsync(timeout).ConfigureAwait(false)
+                    : await RenewSamlHokTokenAsync(token, timeout).ConfigureAwait(false);
+                cache.Set(tokenId, token, new MemoryCacheEntryOptions
                 {
                     Size = 1,
-                    AbsoluteExpiration = token.ValidTo.AddHours(1.0), //keep it for a little while longer so we can renew it if needed.
+                    AbsoluteExpiration = token.ValidTo.AddHours(1)
                 });
                 return token;
-            }
+            }), timeout);
         }
 
         private static bool IsUsable(SecurityToken token)
-        {
-            return token != null && token.ValidTo >= DateTime.UtcNow.AddMinutes(5.0);
-        }
+            => token != null && token.ValidTo >= DateTime.UtcNow.AddMinutes(5);
 
-        /// <summary>
-        /// Obtain a fresh token from the STS.
-        /// </summary>
-        /// <param name="timeout">timeout to respect (currently ignored)</param>
-        /// <returns>The generic xml version of the token</returns>
+        /// <summary>Obtains a fresh token with a bounded STS operation.</summary>
         protected SecurityToken CreateSamlHokToken(TimeSpan timeout)
+            => CreateSamlHokTokenAsync(timeout).ConfigureAwait(false).GetAwaiter().GetResult();
+
+        /// <summary>Obtains a fresh token asynchronously.</summary>
+        protected virtual async Task<SecurityToken> CreateSamlHokTokenAsync(TimeSpan timeout)
         {
+            var deadline = new RequestDeadline(timeout);
             var client = CreateStsClient();
             try
             {
-                XmlElement assertion = client.RequestTicket(_tokenParams.SessionCertificate, _tokenParams.SessionDuration, _tokenParams.AuthClaims); //todo::use timeout
-                return ParseAssertion(assertion);
+                return ParseAssertion(await client.RequestTicketAsync(_tokenParams.SessionCertificate,
+                    _tokenParams.SessionDuration, _tokenParams.AuthClaims, deadline.Remaining).ConfigureAwait(false));
             }
-            finally
-            {
-                WsTrustClient.CloseOrAbort(client);
-            }
+            finally { await WsTrustClient.CloseOrAbortAsync(client, deadline).ConfigureAwait(false); }
         }
 
         private WsTrustClient CreateStsClient()
@@ -204,28 +219,23 @@ namespace Egelke.EHealth.Client.Security
             return client;
         }
 
-        /// <summary>
-        /// Exchange expired token for a new one.
-        /// </summary>
-        /// <param name="previous">previous token to exchange</param>
-        /// <param name="timeout">timeout to respect (currently ignored)</param>
-        /// <returns>The new (valid) token as generic xml token</returns>
-        /// <exception cref="ArgumentException">previous token isn't a generic xml token</exception>
+        /// <summary>Renews a token with a bounded STS operation.</summary>
         protected SecurityToken RenewSamlHokToken(SecurityToken previous, TimeSpan timeout)
+            => RenewSamlHokTokenAsync(previous, timeout).ConfigureAwait(false).GetAwaiter().GetResult();
+
+        /// <summary>Renews a token asynchronously.</summary>
+        protected virtual async Task<SecurityToken> RenewSamlHokTokenAsync(SecurityToken previous, TimeSpan timeout)
         {
-            var xmlToken = previous as GenericXmlSecurityToken ?? throw new ArgumentException("previous token not a GenericXmlSecurityToken", nameof(previous));
+            var xmlToken = previous as GenericXmlSecurityToken ?? throw new ArgumentException("Previous token must be an XML token", nameof(previous));
+            var deadline = new RequestDeadline(timeout);
             var client = CreateStsClient();
             try
             {
-                XmlElement assertion = client.RenewTicket(_tokenParams.SessionCertificate, xmlToken.TokenXml); //todo::use timeout
-                return ParseAssertion(assertion);
+                return ParseAssertion(await client.RenewTicketAsync(_tokenParams.SessionCertificate,
+                    xmlToken.TokenXml, deadline.Remaining).ConfigureAwait(false));
             }
-            finally
-            {
-                WsTrustClient.CloseOrAbort(client);
-            }
+            finally { await WsTrustClient.CloseOrAbortAsync(client, deadline).ConfigureAwait(false); }
         }
-
         private GenericXmlSecurityToken ParseAssertion(XmlElement assertion)
         {
             XmlDocument doc = assertion.OwnerDocument;
@@ -260,3 +270,4 @@ namespace Egelke.EHealth.Client.Security
         }
     }
 }
+

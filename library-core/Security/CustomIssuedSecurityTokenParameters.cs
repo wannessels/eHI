@@ -137,6 +137,7 @@ namespace Egelke.EHealth.Client.Security
 
         private void AppendTo(StringBuilder sb, X509Certificate2 cert)
         {
+            sb.Append(ID_PART_DELIMITER).Append(cert?.Thumbprint ?? EMPTY_VALUE_TEXT);
             sb.Append(ID_PART_DELIMITER);
             AppendTo(sb, cert?.SubjectName);
             sb.Append(CERT_ISSUES_DELIMITER);

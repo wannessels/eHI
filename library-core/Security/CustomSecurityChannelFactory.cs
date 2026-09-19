@@ -34,6 +34,7 @@ namespace Egelke.EHealth.Client.Security
         /// Tracing information to use
         /// </summary>
         public TracingConfig Tracing { get; set; }
+        public TimeSpan SendTimeout { get; set; }
 
 
         public T GetProperty<T>() where T : class
@@ -145,7 +146,8 @@ namespace Egelke.EHealth.Client.Security
                     MessageSecurityVersion = this.MessageSecurityVersion,
                     SignParts = this.SignParts,
                     Security = this.Security,
-                    Tracing = this.Tracing
+                    Tracing = this.Tracing,
+                    SendTimeout = this.SendTimeout
                 };
             }
             else
