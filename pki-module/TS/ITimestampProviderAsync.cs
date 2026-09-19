@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 
 namespace Egelke.EHealth.Client.Pki
 {
-    interface ITimestampProviderAsync : ITimestampProvider
+    public interface ITimestampProviderAsync : ITimestampProvider
     {
 
         /// <summary>
