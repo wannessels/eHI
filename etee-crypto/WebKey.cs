@@ -119,6 +119,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
 
         internal AsymmetricCipherKeyPair BCKeyPair => bcKeyPair.Value;
+        internal AsymmetricAlgorithm NativeKey => key;
 
 
         internal AsymmetricKeyParameter BCPublicKey => bcPublicKey.Value;

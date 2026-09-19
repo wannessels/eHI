@@ -57,6 +57,7 @@ namespace Egelke.EHealth.Etee.Crypto
         private const int StreamBufferSize = 64 * 1024;
 
         private readonly ILogger<TripleWrapper> logger;
+        private readonly bool useNativeRsaPss = Settings.Default.UseNativeRsaPss;
 
         private Level level;
 
@@ -256,7 +257,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 if (signature != null)
                     SignDetached(innerDetached, unsealedStream, signature);
                 else if (ownWebKey != null)
-                    SignDetached(innerDetached, unsealedStream, ownWebKey.BCKeyPair, ownWebKey.Id);
+                    SignDetached(innerDetached, unsealedStream, ownWebKey);
                 else
                     throw new InvalidOperationException("Tripple wrapper must have either cert of keypair for signing");
 
@@ -288,7 +289,7 @@ namespace Egelke.EHealth.Etee.Crypto
                         if (signature != null)
                             SignDetached(outerDetached, encrypted, authentication);
                         else
-                            SignDetached(outerDetached, encrypted, ownWebKey.BCKeyPair, ownWebKey.Id);
+                            SignDetached(outerDetached, encrypted, ownWebKey);
                         success = true;
                     }
                     catch (CryptographicException ce)
@@ -338,6 +339,12 @@ namespace Egelke.EHealth.Etee.Crypto
             AsymmetricAlgorithm key = (AsymmetricAlgorithm)selectedCert.GetECDsaPrivateKey() ?? selectedCert.GetRSAPrivateKey();
             if (key is RSA rsaKey)
             {
+                if (useNativeRsaPss)
+                {
+                    signer.SignatureFactory = new NativeRsaPssSignatureFactory(rsaKey);
+                    signer.OwnedKey = rsaKey;
+                    return signer;
+                }
                 try
                 {
                     signAlgo = EteeActiveConfig.Seal.NativeSignatureAlgorithm;
@@ -379,12 +386,15 @@ namespace Egelke.EHealth.Etee.Crypto
             signed.Write(detachedSignatureBytes, 0, detachedSignatureBytes.Length);
         }
 
-        protected void SignDetached(Stream signed, Stream unsigned, BC::Crypto.AsymmetricCipherKeyPair bcKeyPair, byte[] keyId)
+        protected void SignDetached(Stream signed, Stream unsigned, WebKey webKey)
         {
+            var keyId = webKey.Id;
             logger?.LogInformation("Signing the message in name of {0}", Convert.ToBase64String(keyId));
 
             SignatureAlgorithm signAlgo = EteeActiveConfig.Seal.NativeSignatureAlgorithm;
-            var sigFactory = new Asn1SignatureFactory(signAlgo.Algorithm.FriendlyName, bcKeyPair.Private);
+            ISignatureFactory sigFactory = useNativeRsaPss && webKey.NativeKey is RSA rsa
+                ? (ISignatureFactory)new NativeRsaPssSignatureFactory(rsa)
+                : new Asn1SignatureFactory(signAlgo.Algorithm.FriendlyName, webKey.BCKeyPair.Private);
 
             SignerInfoGenerator sigInfoGen = new SignerInfoGeneratorBuilder()
                 .Build(sigFactory, keyId);

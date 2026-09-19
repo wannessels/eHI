@@ -20,12 +20,14 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
 
         private readonly AsymmetricAlgorithm privateKey;
         private byte[] signatureValue;
+        private readonly RSASignaturePadding padding;
 
-        public WinSignatureResult(Oid hashOid, HashAlgorithm hashAlgorithm, AsymmetricAlgorithm privateKey)
+        public WinSignatureResult(Oid hashOid, HashAlgorithm hashAlgorithm, AsymmetricAlgorithm privateKey, RSASignaturePadding padding = null)
         {
             this.hashOid = hashOid;
             this.hashAlgorithm = hashAlgorithm;
             this.privateKey = privateKey;
+            this.padding = padding ?? RSASignaturePadding.Pkcs1;
         }
 
         public byte[] Collect()
@@ -60,7 +62,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                     default:
                         throw new InvalidOperationException("Hash algorithm not supported :" + hashOid.FriendlyName);
                 }
-                return rsaKey.SignHash(hashAlgorithm.Hash, han, RSASignaturePadding.Pkcs1);
+                return rsaKey.SignHash(hashAlgorithm.Hash, han, padding);
             }
 
             if (privateKey is DSA dsaKey)

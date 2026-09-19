@@ -71,6 +71,10 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         /// </remarks>
         public int SignRetries { get; set; }
 
+        /// <summary>Use platform RSA-PSS/SHA-256 signing instead of managed BouncyCastle RSA. Off by default.</summary>
+        /// <remarks>Captured when a sealer is created. The key provider must support PSS; there is no algorithm downgrade.</remarks>
+        public bool UseNativeRsaPss { get; set; }
+
         private Settings()
         {
             TimestampGracePeriod = new TimeSpan(0, 5, 0);

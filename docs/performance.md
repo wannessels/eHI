@@ -1,5 +1,17 @@
 # Performance configuration
 
+## Native RSA-PSS feature flag
+
+```csharp
+Egelke.EHealth.Etee.Crypto.Configuration.Settings.Default.UseNativeRsaPss = true;
+```
+
+The default is `false`. Enable at startup to use platform `RSA.SignHash` for certificate and WebKey RSA signing. CMS encoding remains in BouncyCastle; signatures use the existing RSA-PSS parameters (SHA-256, MGF1/SHA-256, 32-byte salt, trailer field 1). Each sealer captures the flag on creation; service clients retire their cached sealer when the flag changes. Directly held sealers must be recreated after a change.
+
+Native RSA key providers must support PSS. Unsupported providers fail rather than silently switching the signature algorithm. Disable the flag to restore the existing BouncyCastle path. ECDSA behavior is unchanged, native keys are synchronized during signing, and caller-owned WebKey/certificate objects remain owned by the caller.
+
+## Admission, cancellation and caching
+
 Use one shared policy for clients belonging to the same application capacity budget:
 
 ```csharp
