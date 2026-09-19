@@ -63,10 +63,19 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         /// </value>
         public long InMemorySize { get; set; }
 
-        private Settings() 
+        /// <summary>
+        /// Number of times the outer signature is retried after a CryptographicException, with a back-off of 10^n ms.
+        /// </summary>
+        /// <remarks>
+        /// Works around eID smart cards that refuse to sign twice in quick succession; defaults to 4 on Windows and 0 elsewhere.
+        /// </remarks>
+        public int SignRetries { get; set; }
+
+        private Settings()
         {
             TimestampGracePeriod = new TimeSpan(0, 5, 0);
             InMemorySize = 1024 * 1024;
+            SignRetries = Environment.OSVersion.Platform == PlatformID.Win32NT ? 4 : 0;
         }
     }
 }

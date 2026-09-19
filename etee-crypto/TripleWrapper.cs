@@ -234,14 +234,14 @@ namespace Egelke.EHealth.Etee.Crypto
                     }
                     catch (CryptographicException ce)
                     {
-                        if (retry++ < 4)
+                        if (retry++ < Settings.Default.SignRetries)
                         {
                             logger?.LogWarning(ce, "Failed to put outer signature, starting retry {0}", retry);
                             System.Threading.Thread.Sleep((int)Math.Pow(10, retry));
                         }
                         else
                         {
-                            throw ce;
+                            throw;
                         }
                     }
                 }
