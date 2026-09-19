@@ -81,6 +81,19 @@ namespace Egelke.EHealth.Client.Pki
         public static TimeSpan CrlTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
         /// <summary>
+        /// Maximum time the platform chain builder may spend downloading a missing intermediate, defaults to 5 seconds.
+        /// </summary>
+        public static TimeSpan UrlRetrievalTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+        /// <summary>
+        /// Never let the platform chain builder download missing intermediates (.NET 5+ only), defaults to <c>false</c>.
+        /// </summary>
+        /// <remarks>
+        /// Enable on servers where all intermediates are provided via the extra store.
+        /// </remarks>
+        public static bool DisableCertificateDownloads { get; set; } = false;
+
+        /// <summary>
         /// Wrapper of the X509Chain, just for compatbility
         /// </summary>
         /// <param name="cert">The certificate to validate</param>
@@ -100,6 +113,10 @@ namespace Egelke.EHealth.Client.Pki
                 if (extraStore != null) x509Chain.ChainPolicy.ExtraStore.AddRange(extraStore);
                 x509Chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
                 x509Chain.ChainPolicy.VerificationTime = validationTime;
+                x509Chain.ChainPolicy.UrlRetrievalTimeout = UrlRetrievalTimeout;
+#if NET5_0_OR_GREATER
+                x509Chain.ChainPolicy.DisableCertificateDownloads = DisableCertificateDownloads;
+#endif
                 x509Chain.Build(cert);
 
                 Chain chain = new Chain();
