@@ -17,6 +17,7 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
@@ -35,7 +36,7 @@ namespace Egelke.EHealth.Client.Pki
     /// <summary>
     /// To read P12 files produced by eHealth. 
     /// </summary>
-    public class EHealthP12 : IDictionary<String, X509Certificate2>
+    public class EHealthP12 : IDictionary<String, X509Certificate2>, IDisposable
     {
 //        private const String SnRegExPattern = @"SERIALNUMBER=(?<sn>\d+)";
         private const String SnRegExPattern = @"SSIN=(?<sn>\d+)";
@@ -66,6 +67,8 @@ namespace Egelke.EHealth.Client.Pki
 
         private readonly string password;
         private readonly Pkcs12Store store;
+        private readonly ConcurrentDictionary<string, Lazy<X509Certificate2>> certs = new ConcurrentDictionary<string, Lazy<X509Certificate2>>();
+        private List<string> aliases;
 
         /// <summary>
         /// Create instance from file.
@@ -106,7 +109,8 @@ namespace Egelke.EHealth.Client.Pki
         {
             get
             {
-                return store.Aliases.Cast<String>().ToList<String>();
+                if (aliases == null) aliases = store.Aliases.Cast<String>().ToList<String>();
+                return aliases;
             }
         }
 
@@ -393,7 +397,19 @@ namespace Egelke.EHealth.Client.Pki
 
         private X509Certificate2 GetAsDotNet(string entryAlias)
         {
-            return GetAsDotNet(entryAlias, X509KeyStorageFlags.Exportable);
+            return certs.GetOrAdd(entryAlias, alias => new Lazy<X509Certificate2>(() => GetAsDotNet(alias, X509KeyStorageFlags.Exportable))).Value;
+        }
+
+        /// <summary>
+        /// Disposes the certificates (and their private keys) handed out by this store.
+        /// </summary>
+        public void Dispose()
+        {
+            foreach (var entry in certs.Values)
+            {
+                if (entry.IsValueCreated) entry.Value.Dispose();
+            }
+            certs.Clear();
         }
 
         private X509Certificate2 GetAsDotNet(string entryAlias, X509KeyStorageFlags flags)
