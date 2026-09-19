@@ -64,13 +64,13 @@ namespace Egelke.EHealth.Client.Helper
         /// <param name="correlationState">correlation state, not used</param>
         public void AfterReceiveReply(ref Message reply, object correlationState)
         {
+            if (!_logger.IsEnabled(LogLevel.Information)) return;
+
             var buffer = reply.CreateBufferedCopy(int.MaxValue);
             var copy = buffer.CreateMessage();
             reply = buffer.CreateMessage();
 
-            var xml = MessageToString(copy);
-            _logger.LogInformation("SOAP Response:\n{0}", xml);
-
+            _logger.LogInformation("SOAP Response:\n{0}", MessageToString(copy));
         }
 
         /// <summary>
@@ -81,25 +81,24 @@ namespace Egelke.EHealth.Client.Helper
         /// <returns>a clone of the request, unaltered</returns>
         public object BeforeSendRequest(ref Message request, IClientChannel channel)
         {
+            if (!_logger.IsEnabled(LogLevel.Information)) return null;
+
             var buffer = request.CreateBufferedCopy(int.MaxValue);
             var copy = buffer.CreateMessage();
             request = buffer.CreateMessage(); // Reset original
 
-            var xml = MessageToString(copy);
-            _logger.LogInformation("SOAP Request:\n{0}", xml);
+            _logger.LogInformation("SOAP Request:\n{0}", MessageToString(copy));
             return null;
-
         }
 
         private string MessageToString(Message message)
         {
-            var ms = new MemoryStream();
-            var writer = XmlWriter.Create(ms, _settings);
-            message.WriteMessage(writer);
-            writer.Flush();
-            ms.Position = 0;
-            var reader = new StreamReader(ms);
-            return reader.ReadToEnd();
+            var sw = new StringWriter();
+            using (var writer = XmlWriter.Create(sw, _settings))
+            {
+                message.WriteMessage(writer);
+            }
+            return sw.ToString();
         }
 
     }
