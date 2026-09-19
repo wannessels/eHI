@@ -94,4 +94,32 @@ public class RevocationTests : IDisposable
             Assert.Equal(0, RevocationCache.EstimatedSizeBytes);
         }
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WarmCrlAvoidsOcspAndPreservesRevokedStatus(bool revoked)
+    {
+        using (var server = new PkiFixture.FixtureServer())
+        {
+            var key = PkiFixture.NewKey();
+            var root = PkiFixture.MakeCert("CN=Root", BigInteger.One, key, null, null);
+            var leaf = PkiFixture.MakeCert("CN=Leaf", BigInteger.Two, key, root, key, server.Url + "ocsp", server.Url + "crl");
+            using (var cert = new X509Certificate2(leaf.GetEncoded()))
+            using (var issuer = new X509Certificate2(root.GetEncoded()))
+            {
+                server.Crl = PkiFixture.MakeCrl(root, key, revoked: revoked ? leaf.SerialNumber : null).GetEncoded();
+                for (int i = 0; i < 2; i++)
+                {
+                    var evidence = new List<CertificateList>();
+                    var chain = await cert.BuildChainAsync(DateTime.UtcNow, new X509Certificate2Collection(issuer), evidence, new List<BasicOcspResponse>());
+                    Assert.Equal(revoked, chain.ChainStatus.Any(s => s.Status == X509ChainStatusFlags.Revoked));
+                    Assert.DoesNotContain(chain.ChainStatus, s => s.Status == X509ChainStatusFlags.RevocationStatusUnknown);
+                    Assert.Single(evidence);
+                }
+                Assert.Equal(1, server.OcspRequests);
+                Assert.Equal(1, server.CrlRequests);
+            }
+        }
+    }
 }

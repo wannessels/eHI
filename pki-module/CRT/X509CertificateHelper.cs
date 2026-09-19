@@ -196,6 +196,8 @@ namespace Egelke.EHealth.Client.Pki
                         }
                         if (ocspResponse == null)
                         {
+                            // Fresh local evidence is sufficient; do not wait for a failing responder first.
+                            if (VerifyAvailableCrl(nextCert, nextIssuer, validationTime, crls)) continue;
                             BCAO.OcspResponse ocspMsg = await nextCert.GetOcspResponseAsync(nextIssuer).ConfigureAwait(false);
                             if (ocspMsg != null)
                             {
@@ -207,6 +209,10 @@ namespace Egelke.EHealth.Client.Pki
                         }
                     }
                     catch (RevocationException<BCAO.BasicOcspResponse>)
+                    {
+                        throw;
+                    }
+                    catch (RevocationException<BCAX.CertificateList>)
                     {
                         throw;
                     }
@@ -253,6 +259,23 @@ namespace Egelke.EHealth.Client.Pki
                 }
             }
             return chain;
+        }
+
+        private static bool VerifyAvailableCrl(X509Certificate2 cert, X509Certificate2 issuer, DateTime time, IList<BCAX.CertificateList> crls)
+        {
+            try
+            {
+                if (cert.Verify(issuer, time, crls) != null) return true;
+                if (!RevocationCache.TryGetCrl(cert, issuer, out var cached)) return false;
+                crls.Add(cached);
+                return cert.Verify(issuer, time, crls) != null;
+            }
+            catch (RevocationException<BCAX.CertificateList>) { throw; }
+            catch (Exception error)
+            {
+                trace.TraceEvent(TraceEventType.Warning, 0, "Cached CRL cannot establish status: {0}", error.Message);
+                return false;
+            }
         }
         /// <summary>
         /// Is the OCSP NoCheck extention present?
