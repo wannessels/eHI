@@ -67,6 +67,14 @@ namespace Egelke.EHealth.Client
         public Uri ProxyAddress { get; set; }
 
         /// <summary>
+        /// Maximum size, in bytes, of a message that can be received; also bounds the XML reader quotas.
+        /// </summary>
+        /// <value>
+        /// Defaults to 16 MB (the WCF transport default is 64 KB, which eHealth responses regularly exceed).
+        /// </value>
+        public long MaxReceivedMessageSize { get; set; } = 16L * 1024 * 1024;
+
+        /// <summary>
         /// Default constructor.
         /// </summary>
         /// <param name="logger">Optional logger</param>
@@ -109,11 +117,14 @@ namespace Egelke.EHealth.Client
         /// <returns>standard message encoding element</returns>
         protected MessageEncodingBindingElement CreateMessageEncoding()
         {
-            return new TextMessageEncodingBindingElement()
+            var encoding = new TextMessageEncodingBindingElement()
             {
                 MessageVersion = MessageVersion.Soap11,
-                
             };
+            int quota = (int)Math.Min(MaxReceivedMessageSize, int.MaxValue);
+            encoding.ReaderQuotas.MaxStringContentLength = quota;
+            encoding.ReaderQuotas.MaxArrayLength = quota;
+            return encoding;
         }
 
         /// <summary>
@@ -128,6 +139,8 @@ namespace Egelke.EHealth.Client
                 BypassProxyOnLocal = BypassProxyOnLocal,
                 UseDefaultWebProxy = UseDefaultWebProxy,
                 ProxyAddress = ProxyAddress,
+                MaxReceivedMessageSize = MaxReceivedMessageSize,
+                MaxBufferSize = (int)Math.Min(MaxReceivedMessageSize, int.MaxValue),
             };
         }
 
