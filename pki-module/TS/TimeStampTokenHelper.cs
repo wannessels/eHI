@@ -133,7 +133,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns>The validation chain of the signing certificate</returns>
         public static async Task<Timestamp> ValidateAsync(this TimeStampToken tst)
         {
-            return await tst.ValidateAsync(null, new List<CertificateList>(), new List<BasicOcspResponse>(), null);
+            return await tst.ValidateAsync(null, new List<CertificateList>(), new List<BasicOcspResponse>(), null).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -155,7 +155,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns>The validation chain of the signing certificate</returns>
         public static async Task<Timestamp> ValidateAsync(this TimeStampToken tst, X509Certificate2Collection extraCerts)
         {
-            return await tst.ValidateAsync(extraCerts, new List<CertificateList>(), new List<BasicOcspResponse>(), null);
+            return await tst.ValidateAsync(extraCerts, new List<CertificateList>(), new List<BasicOcspResponse>(), null).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -179,7 +179,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns>The validation chain of the signing certificate</returns>
         public static async Task<Timestamp> ValidateAsync(this TimeStampToken tst, IList<CertificateList> crls, IList<BasicOcspResponse> ocsps)
         {
-            return await tst.ValidateAsync(null, crls, ocsps, null);
+            return await tst.ValidateAsync(null, crls, ocsps, null).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -205,7 +205,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns>The validation chain of the signing certificate</returns>
         public static async Task<Timestamp> ValidateAsync(this TimeStampToken tst, X509Certificate2Collection extraCerts, IList<CertificateList> crls, IList<BasicOcspResponse> ocsps)
         {
-            return await tst.ValidateAsync(extraCerts, crls, ocsps, null);
+            return await tst.ValidateAsync(extraCerts, crls, ocsps, null).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -231,7 +231,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns>The validation chain of the signing certificate</returns>
         public static async Task<Timestamp> ValidateAsync(this TimeStampToken tst, IList<CertificateList> crls, IList<BasicOcspResponse> ocsps, DateTime? trustedTime)
         {
-            return await tst.ValidateAsync(null, crls, ocsps, trustedTime);
+            return await tst.ValidateAsync(null, crls, ocsps, trustedTime).ConfigureAwait(false);
         }
 
         /// <summary>
