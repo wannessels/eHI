@@ -69,6 +69,8 @@ namespace Egelke.EHealth.Client.Pki
         private static readonly TimeSpan ClockSkewness = new TimeSpan(0, 5, 0);
         private static readonly TraceSource trace = new TraceSource("Egelke.EHealth.Tsa");
         private static readonly HttpClient http = new HttpClient() { Timeout = Timeout.InfiniteTimeSpan };
+        private static readonly AsyncSingleFlight<string, BCAO.OcspResponse> ocspDownloads = new AsyncSingleFlight<string, BCAO.OcspResponse>();
+        private static readonly AsyncSingleFlight<string, BCAX.CertificateList> crlDownloads = new AsyncSingleFlight<string, BCAX.CertificateList>();
 
         /// <summary>
         /// Maximum time to wait for a single OCSP responder, defaults to 5 seconds.
@@ -197,10 +199,10 @@ namespace Egelke.EHealth.Client.Pki
                             BCAO.OcspResponse ocspMsg = await nextCert.GetOcspResponseAsync(nextIssuer).ConfigureAwait(false);
                             if (ocspMsg != null)
                             {
-                                ocspResponse = BCAO.BasicOcspResponse.GetInstance(BCA.Asn1Object.FromByteArray(ocspMsg.ResponseBytes.Response.GetOctets()));
-                                RevocationCache.PutOcsp(nextCert, nextIssuer, ocspResponse);
-                                ocsps.Add(ocspResponse);
+                                var downloaded = BCAO.BasicOcspResponse.GetInstance(BCA.Asn1Object.FromByteArray(ocspMsg.ResponseBytes.Response.GetOctets()));
+                                ocsps.Add(downloaded);
                                 ocspResponse = nextCert.Verify(nextIssuer, validationTime, ocsps);
+                                if (ocspResponse != null) RevocationCache.PutOcsp(nextCert, nextIssuer, ocspResponse);
                             }
                         }
                     }
@@ -210,13 +212,14 @@ namespace Egelke.EHealth.Client.Pki
                     }
                     catch (Exception e)
                     {
+                        ocspResponse = null;
                         trace.TraceEvent(TraceEventType.Warning, 0, "OCSP validation of {0} failed, falling back to CRL: {1}", nextCert.Subject, e.Message);
                     }
 
                     if (ocspResponse == null)
                     {
                         BCAX.CertificateList crl = nextCert.Verify(nextIssuer, validationTime, crls);
-                        if (crl == null && RevocationCache.TryGetCrl(nextCert, out BCAX.CertificateList cachedCrl))
+                        if (crl == null && RevocationCache.TryGetCrl(nextCert, nextIssuer, out BCAX.CertificateList cachedCrl))
                         {
                             crls.Add(cachedCrl);
                             crl = nextCert.Verify(nextIssuer, validationTime, crls);
@@ -226,19 +229,22 @@ namespace Egelke.EHealth.Client.Pki
                             crl = await nextCert.GetCertificateListAsync().ConfigureAwait(false);
                             if (crl != null)
                             {
-                                RevocationCache.PutCrl(nextCert, crl);
                                 crls.Add(crl);
                                 crl = nextCert.Verify(nextIssuer, validationTime, crls);
+                                if (crl != null) RevocationCache.PutCrl(nextCert, nextIssuer, crl);
                             }
                         }
+                        if (crl == null) throw new RevocationUnknownException("No applicable revocation evidence was found");
                     }
                 }
-                catch (RevocationException<BCAO.BasicOcspResponse>)
+                catch (RevocationException<BCAO.BasicOcspResponse> revoked)
                 {
+                    RevocationCache.PutOcsp(nextCert, nextIssuer, revoked.RevocationInfo);
                     AddErrorStatus(chain.ChainStatus, chain.ChainElements[i].ChainElementStatus, X509ChainStatusFlags.Revoked, "The certificate has been revoked");
                 }
-                catch (RevocationException<BCAX.CertificateList>)
+                catch (RevocationException<BCAX.CertificateList> revoked)
                 {
+                    RevocationCache.PutCrl(nextCert, nextIssuer, revoked.RevocationInfo);
                     AddErrorStatus(chain.ChainStatus, chain.ChainElements[i].ChainElementStatus, X509ChainStatusFlags.Revoked, "The certificate has been revoked");
                 }
                 catch
@@ -391,6 +397,7 @@ namespace Egelke.EHealth.Client.Pki
             ValueWithRef<ParsedCrl, BCAX.CertificateList> crlWithOrg = certLists
                 .Select((c) => new ValueWithRef<ParsedCrl, BCAX.CertificateList>(ParsedCrl.Get(c), c)) //convert, keep orginal
                 .Where((c) => c.Value.Crl.IssuerDN.Equals(certificateBC.IssuerDN))
+                .Where((c) => IsApplicableCrl(certificateBC, c.Value.Crl))
                 .Where((c) => c.Value.Crl.ThisUpdate >= minTime || (c.Value.Crl.NextUpdate != null && c.Value.Crl.NextUpdate.Value >= minTime))
                 .OrderByDescending((c) => c.Value.Crl.ThisUpdate)
                 .FirstOrDefault();
@@ -431,6 +438,24 @@ namespace Egelke.EHealth.Client.Pki
             return certList;
         }
 
+        private static bool IsApplicableCrl(BCX.X509Certificate cert, BCX.X509Crl crl)
+        {
+            // Delta, indirect and reason-partitioned CRLs require evidence-combination logic we do not implement.
+            if (crl.GetExtensionValue(BCAX.X509Extensions.DeltaCrlIndicator) != null) return false;
+            var extension = crl.GetExtensionValue(BCAX.X509Extensions.IssuingDistributionPoint);
+            if (extension == null) return true;
+            var scope = BCAX.IssuingDistributionPoint.GetInstance(extension.GetOctets());
+            if (scope.IsIndirectCrl || scope.OnlyContainsAttributeCerts || scope.OnlySomeReasons != null) return false;
+            bool isCa = cert.GetBasicConstraints() >= 0;
+            if (scope.OnlyContainsCACerts && !isCa || scope.OnlyContainsUserCerts && isCa) return false;
+            if (scope.DistributionPoint == null) return true;
+            var pointsExtension = cert.GetExtensionValue(BCAX.X509Extensions.CrlDistributionPoints);
+            if (pointsExtension == null) return false;
+            var points = BCAX.CrlDistPoint.GetInstance(pointsExtension.GetOctets()).GetDistributionPoints();
+            return points.Any(point => point.CrlIssuer == null && point.Reasons == null &&
+                point.DistributionPointName != null && point.DistributionPointName.Equals(scope.DistributionPoint));
+        }
+
 
         /// <summary>
         /// Gets the OCSP response from the server.
@@ -467,16 +492,9 @@ namespace Egelke.EHealth.Client.Pki
                 {
                     if (ocspReqBytes == null) ocspReqBytes = cert.GetOcspReqBody(issuer).GetEncoded();
 
-                    using (var cts = new CancellationTokenSource(OcspTimeout))
-                    using (var content = new ByteArrayContent(ocspReqBytes))
-                    {
-                        content.Headers.ContentType = new MediaTypeHeaderValue("application/ocsp-request");
-                        using (HttpResponseMessage webRsp = await http.PostAsync(uri, content, cts.Token).ConfigureAwait(false))
-                        {
-                            VerifyOCSPRsp(webRsp);
-                            return ParseOCSPResponse(await webRsp.Content.ReadAsByteArrayAsync().ConfigureAwait(false));
-                        }
-                    }
+                    byte[] request = ocspReqBytes;
+                    return await ocspDownloads.RunAsync(uri.AbsoluteUri + "|" + issuer.Thumbprint + "|" + cert.SerialNumber,
+                        () => DownloadOcspAsync(uri, request)).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
@@ -486,6 +504,20 @@ namespace Egelke.EHealth.Client.Pki
             }
             if (lastException != null) throw lastException;
             return null;
+        }
+
+        private static async Task<BCAO.OcspResponse> DownloadOcspAsync(Uri uri, byte[] request)
+        {
+            using (var cts = new CancellationTokenSource(OcspTimeout))
+            using (var content = new ByteArrayContent(request))
+            {
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/ocsp-request");
+                using (var response = await http.PostAsync(uri, content, cts.Token).ConfigureAwait(false))
+                {
+                    VerifyOCSPRsp(response);
+                    return ParseOCSPResponse(await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false));
+                }
+            }
         }
 
         private static BCO.OcspReq GetOcspReqBody(this X509Certificate2 cert, X509Certificate2 issuer)
@@ -558,13 +590,7 @@ namespace Egelke.EHealth.Client.Pki
             {
                 try
                 {
-                    using (var cts = new CancellationTokenSource(CrlTimeout))
-                    using (HttpResponseMessage webRsp = await http.GetAsync(uri, cts.Token).ConfigureAwait(false))
-                    {
-                        VerifyCrlRsp(webRsp);
-                        byte[] body = await webRsp.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                        return BCAX.CertificateList.GetInstance(BCA.Asn1Sequence.FromByteArray(body));
-                    }
+                    return await crlDownloads.RunAsync(uri.AbsoluteUri, () => DownloadCrlAsync(uri)).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
@@ -574,6 +600,17 @@ namespace Egelke.EHealth.Client.Pki
             }
             if (lastException != null) throw lastException;
             return null;
+        }
+
+        private static async Task<BCAX.CertificateList> DownloadCrlAsync(Uri uri)
+        {
+            using (var cts = new CancellationTokenSource(CrlTimeout))
+            using (var response = await http.GetAsync(uri, cts.Token).ConfigureAwait(false))
+            {
+                VerifyCrlRsp(response);
+                var body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                return BCAX.CertificateList.GetInstance(BCA.Asn1Sequence.FromByteArray(body));
+            }
         }
 
         private static void VerifyCrlRsp(HttpResponseMessage webRsp)
