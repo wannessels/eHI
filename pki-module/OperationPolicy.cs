@@ -14,9 +14,11 @@ namespace Egelke.EHealth.Client.Pki
         private readonly CancellationToken token;
         private readonly Stopwatch elapsed = Stopwatch.StartNew();
         private readonly TimeSpan timeout;
+        private bool admitted;
         /// <summary>The cancellation token flowing through the current operation.</summary>
         public static CancellationToken Cancellation => current.Value?.token ?? CancellationToken.None;
-        internal static bool IsActive => current.Value != null;
+        internal static bool IsAdmitted => current.Value?.admitted == true;
+        internal void MarkAdmitted() { admitted = true; }
         /// <summary>Starts a nested scope inheriting the caller's deadline.</summary>
         public OperationScope(CancellationToken cancellationToken, TimeSpan timeout) : this(cancellationToken, timeout, true) { }
         /// <summary>Starts a scope; shared operations can opt out of inheriting an individual waiter's deadline.</summary>
@@ -24,6 +26,7 @@ namespace Egelke.EHealth.Client.Pki
         {
             if (timeout <= TimeSpan.Zero || timeout.TotalMilliseconds > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(timeout));
             previous = current.Value;
+            admitted = inherit && (previous?.admitted ?? false);
             this.timeout = inherit ? LimitTimeout(timeout) : timeout;
             source = inherit ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, Cancellation) : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             source.CancelAfter(this.timeout);
@@ -57,6 +60,7 @@ namespace Egelke.EHealth.Client.Pki
             }
             finally { System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
         }
+        /// <summary>Restores the enclosing operation scope.</summary>
         public void Dispose() { current.Value = previous; source.Dispose(); }
     }
 
@@ -78,11 +82,12 @@ namespace Egelke.EHealth.Client.Pki
         /// <summary>Runs a complete operation with cancellation and a deadline.</summary>
         public async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
         {
-            bool nested = OperationScope.IsActive;
+            bool nested = OperationScope.IsAdmitted;
             using (var scope = new OperationScope(cancellationToken, Timeout))
             {
                 var token = OperationScope.Cancellation;
                 if (!nested) await admission.WaitAsync(token).ConfigureAwait(false);
+                scope.MarkAdmitted();
                 try
                 {
                     token.ThrowIfCancellationRequested();

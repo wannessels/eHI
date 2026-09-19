@@ -30,6 +30,23 @@ public class CancellationTests
     }
 
     [Fact]
+    public async Task CallerCreatedCancellationScopeDoesNotBypassAdmission()
+    {
+        var policy = new OperationPolicy(1, TimeSpan.FromSeconds(5));
+        using (var scope = new OperationScope(CancellationToken.None, TimeSpan.FromSeconds(5)))
+        {
+            var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var first = policy.RunAsync(_ => release.Task);
+            bool secondStarted = false;
+            var second = policy.RunAsync(_ => { secondStarted = true; return Task.FromResult(2); });
+            Assert.False(secondStarted);
+            release.SetResult(1);
+            Assert.Equal(1, await first);
+            Assert.Equal(2, await second);
+        }
+    }
+
+    [Fact]
     public async Task DeadlineCancelsActiveWorkAndNestedCallsDoNotDeadlock()
     {
         var policy = new OperationPolicy(1, TimeSpan.FromMilliseconds(100));
@@ -88,6 +105,24 @@ public class CancellationTests
             var task = provider.GetTimestampFromDocumentHashAsync(new byte[32], "http://www.w3.org/2001/04/xmlenc#sha256", cancellation.Token);
             cancellation.CancelAfter(30);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+        }
+    }
+
+    [Fact]
+    public async Task ExplicitDownloadTokenAlsoHonorsTheEnclosingDeadline()
+    {
+        using (var server = new PkiFixture.FixtureServer())
+        {
+            var key = PkiFixture.NewKey();
+            var root = PkiFixture.MakeCert("CN=Root", Org.BouncyCastle.Math.BigInteger.One, key, null, null);
+            using (var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(
+                PkiFixture.MakeCert("CN=Leaf", Org.BouncyCastle.Math.BigInteger.Two, key, root, key, crl: server.Url + "crl").GetEncoded()))
+            using (var scope = new OperationScope(CancellationToken.None, TimeSpan.FromMilliseconds(100)))
+            {
+                server.DelayMilliseconds = 1000;
+                server.Crl = PkiFixture.MakeCrl(root, key).GetEncoded();
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cert.GetCertificateListAsync(CancellationToken.None));
+            }
         }
     }
 

@@ -348,7 +348,7 @@ namespace Egelke.EHealth.Client.Pki
                     .EnumerateMatches(selector)
                     .Cast<BCX.X509Certificate>()
                     .FirstOrDefault();
-            } 
+            }
             else if (keyHash != null)
             {
                 //Get the signer certificate via key hash
@@ -358,7 +358,8 @@ namespace Egelke.EHealth.Client.Pki
                         .GetCertificates()
                         .EnumerateMatches(null)
                         .Cast<BCX.X509Certificate>()
-                        .Where(c => {
+                        .Where(c =>
+                        {
                             byte[] certKey = c.CertificateStructure.SubjectPublicKeyInfo.PublicKey.GetBytes();
                             byte[] certkeyHash = sha1.ComputeHash(certKey);
                             return Enumerable.SequenceEqual(certkeyHash, keyHash);
@@ -367,7 +368,7 @@ namespace Egelke.EHealth.Client.Pki
                 }
             }
             else
-            { 
+            {
                 trace.TraceEvent(TraceEventType.Error, 0, "OCSP response for {0} does not have a ResponderID", certificate.Subject);
                 throw new RevocationUnknownException("OCSP response for {0} does not have a ResponderID");
             }
@@ -524,28 +525,33 @@ namespace Egelke.EHealth.Client.Pki
         /// <summary>Downloads OCSP evidence, cancelling only this waiter when a fetch is shared.</summary>
         public static async Task<BCAO.OcspResponse> GetOcspResponseAsync(this X509Certificate2 cert, X509Certificate2 issuer, CancellationToken cancellationToken)
         {
-            Exception lastException = null;
-            byte[] ocspReqBytes = null;
-            foreach (Uri uri in cert.GetOCSPUris())
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, OperationScope.Cancellation))
             {
+                cancellationToken = linked.Token;
                 cancellationToken.ThrowIfCancellationRequested();
-                try
-                {
-                    if (ocspReqBytes == null) ocspReqBytes = cert.GetOcspReqBody(issuer).GetEncoded();
-
-                    byte[] request = ocspReqBytes;
-                    return await ocspDownloads.RunAsync(uri.AbsoluteUri + "|" + issuer.Thumbprint + "|" + cert.SerialNumber,
-                        token => DownloadOcspAsync(uri, request, token), cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception e)
+                Exception lastException = null;
+                byte[] ocspReqBytes = null;
+                foreach (Uri uri in cert.GetOCSPUris())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    lastException = e;
-                    trace.TraceEvent(TraceEventType.Warning, 0, "Failed to manually obtain ocsp: {0}", e);
+                    try
+                    {
+                        if (ocspReqBytes == null) ocspReqBytes = cert.GetOcspReqBody(issuer).GetEncoded();
+
+                        byte[] request = ocspReqBytes;
+                        return await ocspDownloads.RunAsync(uri.AbsoluteUri + "|" + issuer.Thumbprint + "|" + cert.SerialNumber,
+                            token => DownloadOcspAsync(uri, request, token), cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception e)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        lastException = e;
+                        trace.TraceEvent(TraceEventType.Warning, 0, "Failed to manually obtain ocsp: {0}", e);
+                    }
                 }
+                if (lastException != null) throw lastException;
+                return null;
             }
-            if (lastException != null) throw lastException;
-            return null;
         }
 
         private static async Task<BCAO.OcspResponse> DownloadOcspAsync(Uri uri, byte[] request, CancellationToken cancellationToken)
@@ -632,23 +638,28 @@ namespace Egelke.EHealth.Client.Pki
         /// <summary>Downloads a CRL, cancelling only this waiter when a fetch is shared.</summary>
         public static async Task<BCAX.CertificateList> GetCertificateListAsync(this X509Certificate2 cert, CancellationToken cancellationToken)
         {
-            Exception lastException = null;
-            foreach (Uri uri in cert.GetCrlWebUris())
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, OperationScope.Cancellation))
             {
+                cancellationToken = linked.Token;
                 cancellationToken.ThrowIfCancellationRequested();
-                try
-                {
-                    return await crlDownloads.RunAsync(uri.AbsoluteUri, token => DownloadCrlAsync(uri, token), cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception e)
+                Exception lastException = null;
+                foreach (Uri uri in cert.GetCrlWebUris())
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    lastException = e;
-                    trace.TraceEvent(TraceEventType.Warning, 0, "Failed to manually obtain crl: {0}", e);
+                    try
+                    {
+                        return await crlDownloads.RunAsync(uri.AbsoluteUri, token => DownloadCrlAsync(uri, token), cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception e)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        lastException = e;
+                        trace.TraceEvent(TraceEventType.Warning, 0, "Failed to manually obtain crl: {0}", e);
+                    }
                 }
+                if (lastException != null) throw lastException;
+                return null;
             }
-            if (lastException != null) throw lastException;
-            return null;
         }
 
         private static async Task<BCAX.CertificateList> DownloadCrlAsync(Uri uri, CancellationToken cancellationToken)
@@ -658,9 +669,9 @@ namespace Egelke.EHealth.Client.Pki
                 cts.CancelAfter(CrlTimeout);
                 using (var response = await http.GetAsync(uri, cts.Token).ConfigureAwait(false))
                 {
-                VerifyCrlRsp(response);
-                var body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                return BCAX.CertificateList.GetInstance(BCA.Asn1Sequence.FromByteArray(body));
+                    VerifyCrlRsp(response);
+                    var body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                    return BCAX.CertificateList.GetInstance(BCA.Asn1Sequence.FromByteArray(body));
                 }
             }
         }
@@ -709,3 +720,4 @@ namespace Egelke.EHealth.Client.Pki
         }
     }
 }
+
