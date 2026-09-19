@@ -9,6 +9,7 @@ using System.ServiceModel;
 using System.ServiceModel.Channels;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Xml;
 using System.Xml.Linq;
 using Egelke.EHealth.Client.Pki;
@@ -18,6 +19,7 @@ using Egelke.EHealth.Etee.Crypto;
 using Egelke.EHealth.Etee.Crypto.Receiver;
 using Egelke.EHealth.Etee.Crypto.Sender;
 using Egelke.EHealth.Etee.Crypto.Status;
+using TrustStatus = Egelke.EHealth.Etee.Crypto.Status.TrustStatus;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -26,6 +28,23 @@ namespace Egelke.EHealth.Client.Services
     public class ServiceClient<Port> : ClientBase<Port> where Port : class
     {
         protected readonly ILogger<ServiceClient<Port>> _logger;
+
+        /// <summary>Shared admission and deadline policy for complete service calls.</summary>
+        public OperationPolicy OperationPolicy { get; set; } = OperationPolicy.Default;
+
+        protected Task<T> RunOperationAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
+            => OperationPolicy.RunAsync(_ => operation(), cancellationToken);
+
+        protected async Task<T> SendAsync<T>(Func<Task<T>> send)
+        {
+            var cancellationToken = OperationScope.Cancellation;
+            cancellationToken.ThrowIfCancellationRequested();
+            using (cancellationToken.Register(Abort))
+            {
+                try { return await send().ConfigureAwait(false); }
+                catch (Exception) when (cancellationToken.IsCancellationRequested) { throw new OperationCanceledException(cancellationToken); }
+            }
+        }
 
         private readonly ResourceCache<Tuple<Level, X509Certificate2>, IDataSealer> sealers =
             new ResourceCache<Tuple<Level, X509Certificate2>, IDataSealer>((a, b) => a.Item1 == b.Item1 && ReferenceEquals(a.Item2, b.Item2));
@@ -39,7 +58,7 @@ namespace Egelke.EHealth.Client.Services
             return new ServiceClient<Port>(store, binding, remoteAddress, logger);
         }
 
-        public PartyInfo Sender {  get; set; } = new PartyInfo();
+        public PartyInfo Sender { get; set; } = new PartyInfo();
 
         public PartyInfo Service { get; set; } = new PartyInfo();
 
@@ -248,29 +267,29 @@ namespace Egelke.EHealth.Client.Services
 
             try
             {
-            if (result.SecurityInformation.ValidationStatus != ValidationStatus.Valid)
-                throw new SecurityException("Clear text not valid");
-            if (result.SecurityInformation.TrustStatus == TrustStatus.None)
-                throw new SecurityException("Clear text untrused");
+                if (result.SecurityInformation.ValidationStatus != ValidationStatus.Valid)
+                    throw new SecurityException("Clear text not valid");
+                if (result.SecurityInformation.TrustStatus == TrustStatus.None)
+                    throw new SecurityException("Clear text untrused");
 
-            if (_logger?.IsEnabled(LogLevel.Debug) == true)
-            {
-                using (var reader = new StreamReader(result.UnsealedData, Encoding.UTF8, true, 1024, true))
-                    _logger.LogDebug("decrypted content: {0}", reader.ReadToEnd());
-                result.UnsealedData.Position = 0;
-            }
+                if (_logger?.IsEnabled(LogLevel.Debug) == true)
+                {
+                    using (var reader = new StreamReader(result.UnsealedData, Encoding.UTF8, true, 1024, true))
+                        _logger.LogDebug("decrypted content: {0}", reader.ReadToEnd());
+                    result.UnsealedData.Position = 0;
+                }
 
-            switch (typeof(ClearType))
-            {
-                case Type ct when ct == typeof(Stream):
-                    return result.UnsealedData as ClearType;
-                case Type ct when ct == typeof(byte[]):
-                    using (result.UnsealedData) return ToByteArray(result.UnsealedData) as ClearType;
-                case Type ct when ct == typeof(XmlElement):
-                    using (result.UnsealedData) return ToXmlElement(result.UnsealedData) as ClearType;
-                default:
-                    throw new NotImplementedException("Clear text type not supported yet");
-            }
+                switch (typeof(ClearType))
+                {
+                    case Type ct when ct == typeof(Stream):
+                        return result.UnsealedData as ClearType;
+                    case Type ct when ct == typeof(byte[]):
+                        using (result.UnsealedData) return ToByteArray(result.UnsealedData) as ClearType;
+                    case Type ct when ct == typeof(XmlElement):
+                        using (result.UnsealedData) return ToXmlElement(result.UnsealedData) as ClearType;
+                    default:
+                        throw new NotImplementedException("Clear text type not supported yet");
+                }
             }
             catch
             {

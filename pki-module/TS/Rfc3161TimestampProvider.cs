@@ -92,15 +92,23 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns>The time-stamp token in binary (encoded) format</returns>
         /// <exception cref="WebException">When the TSA returned a http-error</exception>
         /// <exception cref="TspValidationException">When the TSA returns an invalid time-stamp response</exception>
-        public async Task<byte[]> GetTimestampFromDocumentHashAsync(byte[] hash, string digestMethod)
+        public Task<byte[]> GetTimestampFromDocumentHashAsync(byte[] hash, string digestMethod)
+            => GetTimestampFromDocumentHashAsync(hash, digestMethod, CancellationToken.None);
+
+        /// <summary>Gets a timestamp under the shared operation policy with caller cancellation.</summary>
+        public Task<byte[]> GetTimestampFromDocumentHashAsync(byte[] hash, string digestMethod, CancellationToken cancellationToken)
+            => OperationPolicy.Default.RunAsync(_ => GetTimestampCoreAsync(hash, digestMethod), cancellationToken);
+
+        private async Task<byte[]> GetTimestampCoreAsync(byte[] hash, string digestMethod)
         {
             TimeStampRequest tspReq = CreateRfc3161RequestBody(hash, digestMethod);
             byte[] tsprBytes = tspReq.GetEncoded();
             trace.TraceEvent(TraceEventType.Information, 0, "retrieving time-stamp of {0} from {1}", Convert.ToBase64String(hash), address);
 
-            using (var cts = new CancellationTokenSource(Timeout))
+            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(OperationScope.Cancellation))
             using (var content = new ByteArrayContent(tsprBytes))
             {
+                cts.CancelAfter(OperationScope.LimitTimeout(Timeout));
                 content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-query");
                 using (HttpResponseMessage response = await http.PostAsync(address, content, cts.Token).ConfigureAwait(false))
                 {

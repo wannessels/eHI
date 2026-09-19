@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -10,6 +10,7 @@ using System.ServiceModel.Channels;
 using System.ServiceModel.Description;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Xml;
 using System.Xml.Linq;
 using Egelke.EHealth.Client.Pki;
@@ -75,30 +76,22 @@ namespace Egelke.EHealth.Client.Services.Mda
             return ToXmlElement(reqBody);
         }
 
-        public IEnumerable<XmlElement> Consult(XmlElement query, bool etee = false)
-        {
-            string reqId = ExtractQueryId(query);
+        public IEnumerable<XmlElement> Consult(XmlElement query, bool etee = false) => ConsultAsync(query, etee).ConfigureAwait(false).GetAwaiter().GetResult();
+        public Task<IEnumerable<XmlElement>> ConsultAsync(XmlElement query, bool etee = false) => ConsultAsync(query, etee, CancellationToken.None);
 
-            var req = CreateRequest<SendRequestMemberDataType>(reqId, query, etee ? EncryptionType.EncryptedForKnownBED : (EncryptionType?) null);
-            LogCall(req, query);
+        public Task<IEnumerable<XmlElement>> ConsultAsync(XmlElement query, bool etee, CancellationToken cancellationToken)
+            => RunOperationAsync(() => ConsultCoreAsync(query, etee), cancellationToken);
 
-            ResponseReturnType rtn = Channel.memberDataConsultation(
-                    new memberDataConsultationRequest() {  MemberDataConsultationRequest = req }
-                )?.MemberDataConsultationResponse?.Return;
-
-            return ParseAssertions(HandleReturn<XmlElement>(rtn));
-        }
-
-        public async Task<IEnumerable<XmlElement>> ConsultAsync(XmlElement query, bool etee = false)
+        private async Task<IEnumerable<XmlElement>> ConsultCoreAsync(XmlElement query, bool etee)
         {
             string reqId = ExtractQueryId(query);
 
             var req = await CreateRequestAsync<SendRequestMemberDataType>(reqId, query, etee ? EncryptionType.EncryptedForKnownBED : (EncryptionType?)null).ConfigureAwait(false);
             LogCall(req, query);
 
-            memberDataConsultationResponse response = await Channel.memberDataConsultationAsync(
+            memberDataConsultationResponse response = await SendAsync(() => Channel.memberDataConsultationAsync(
                     new memberDataConsultationRequest() { MemberDataConsultationRequest = req }
-                ).ConfigureAwait(false);
+                )).ConfigureAwait(false);
             ResponseReturnType rtn = response?.MemberDataConsultationResponse?.Return;
 
             return ParseAssertions(await HandleReturnAsync<XmlElement>(rtn).ConfigureAwait(false));
@@ -145,3 +138,5 @@ namespace Egelke.EHealth.Client.Services.Mda
         
     }
 }
+
+

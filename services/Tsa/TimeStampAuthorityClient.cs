@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -6,6 +6,7 @@ using System.ServiceModel;
 using System.ServiceModel.Channels;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 using Egelke.EHealth.Client.Pki;
 using Microsoft.Extensions.Logging;
 
@@ -25,28 +26,24 @@ namespace Egelke.EHealth.Client.Services.Tsa
             : base(store, binding, remoteAddress, logger)
         { }
 
-        public SignResponse Stamp(SignRequest request)
+        public SignResponse Stamp(SignRequest request) => StampAsync(request).ConfigureAwait(false).GetAwaiter().GetResult();
+        public Task<SignResponse> StampAsync(SignRequest request) => StampAsync(request, CancellationToken.None);
+
+        public Task<SignResponse> StampAsync(SignRequest request, CancellationToken cancellationToken)
+            => RunOperationAsync(() => StampCoreAsync(request), cancellationToken);
+
+        private async Task<SignResponse> StampCoreAsync(SignRequest request)
         {
             var reqMsg = new stampRequest()
             {
                 SignRequest = request
             };
 
-            var rspMsg = Channel.stamp(reqMsg);
-
-            return rspMsg.SignResponse;
-        }
-
-        public async Task<SignResponse> StampAsync(SignRequest request)
-        {
-            var reqMsg = new stampRequest()
-            {
-                SignRequest = request
-            };
-
-            var rspMsg = await Channel.stampAsync(reqMsg).ConfigureAwait(false);
+            var rspMsg = await SendAsync(() => Channel.stampAsync(reqMsg)).ConfigureAwait(false);
 
             return rspMsg.SignResponse;
         }
     }
 }
+
+

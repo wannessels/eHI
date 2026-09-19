@@ -22,6 +22,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Security.Cryptography.X509Certificates;
 using Egelke.EHealth.Client.Pki;
 
@@ -110,6 +111,10 @@ namespace Egelke.EHealth.Client.Services.Tsa
         {
             return ParseResponse(await client.StampAsync(CreateRequest(hash, digestMethod)).ConfigureAwait(false));
         }
+
+        /// <summary>Requests a timestamp with cancellation covering the complete service call.</summary>
+        public Task<byte[]> GetTimestampFromDocumentHashAsync(byte[] hash, string digestMethod, CancellationToken cancellationToken)
+            => OperationPolicy.Default.RunAsync(_ => GetTimestampFromDocumentHashAsync(hash, digestMethod), cancellationToken);
 
         private SignRequest CreateRequest(byte[] hash, string digestMethod)
         {

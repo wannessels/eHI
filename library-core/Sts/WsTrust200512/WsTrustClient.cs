@@ -29,6 +29,8 @@ using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Serialization;
 using System.Threading.Tasks;
+using System.Threading;
+using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Client.Helper;
 using Egelke.EHealth.Client.Sts.WsTrust200512.Error;
 using Microsoft.Extensions.Logging;
@@ -130,7 +132,7 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
             => RenewTicketAsync(sessionCert, previousTicket).ConfigureAwait(false).GetAwaiter().GetResult();
 
         /// <summary>Renews a ticket, including any challenge, within one deadline.</summary>
-        public Task<XmlElement> RenewTicketAsync(X509Certificate2 sessionCert, XmlElement previousTicket, TimeSpan? timeout = null)
+        public Task<XmlElement> RenewTicketAsync(X509Certificate2 sessionCert, XmlElement previousTicket, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
         {
             //make the request
             var request = new RequestSecurityTokenRequest()
@@ -153,7 +155,7 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
                 }
             };
 
-            return SendAsync(sessionCert, request, new RequestDeadline(timeout ?? Endpoint.Binding.SendTimeout));
+            return SendAsync(sessionCert, request, new RequestDeadline(timeout ?? Endpoint.Binding.SendTimeout), cancellationToken);
         }
 
         /// <summary>
@@ -182,11 +184,11 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
                 new RequestDeadline(Endpoint.Binding.SendTimeout)).ConfigureAwait(false).GetAwaiter().GetResult();
 
         /// <summary>Issues a ticket, including any challenge, within one deadline.</summary>
-        public Task<XmlElement> RequestTicketAsync(X509Certificate2 sessionCert, TimeSpan duration, AuthClaimSet claims, TimeSpan? timeout = null)
+        public Task<XmlElement> RequestTicketAsync(X509Certificate2 sessionCert, TimeSpan duration, AuthClaimSet claims, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
         {
             var now = DateTime.UtcNow;
             return SendAsync(sessionCert, CreateIssueRequest(sessionCert, now, now.Add(duration), claims),
-                new RequestDeadline(timeout ?? Endpoint.Binding.SendTimeout));
+                new RequestDeadline(timeout ?? Endpoint.Binding.SendTimeout), cancellationToken);
         }
 
         private static RequestSecurityTokenRequest CreateIssueRequest(X509Certificate2 sessionCert, DateTime notBefore, DateTime notOnOrAfter, AuthClaimSet claims)
@@ -241,32 +243,41 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
             return request;
         }
 
-        private async Task<XmlElement> SendAsync(X509Certificate2 sessionCert, RequestSecurityTokenRequest request, RequestDeadline deadline)
+        private async Task<XmlElement> SendAsync(X509Certificate2 sessionCert, RequestSecurityTokenRequest request, RequestDeadline deadline, CancellationToken cancellationToken = default)
         {
-            InnerChannel.OperationTimeout = deadline.Remaining;
-            using (Message responseMsg = await Channel.RequestSecurityTokenAsync(request).ConfigureAwait(false))
+            using (var scope = new OperationScope(cancellationToken, deadline.Remaining))
+            using (OperationScope.Cancellation.Register(Abort))
             {
-            ValidateMessage(responseMsg);
-            
-            var responseBody = new XmlDocument
-            {
-                PreserveWhitespace = true
-            };
-            using (var reader = responseMsg.GetReaderAtBodyContents()) responseBody.Load(reader);
+                try
+                {
+                    InnerChannel.OperationTimeout = deadline.Remaining;
+                    using (Message responseMsg = await Channel.RequestSecurityTokenAsync(request).ConfigureAwait(false))
+                    {
+                        ValidateMessage(responseMsg);
 
-            XmlNodeList assertions = responseBody.GetElementsByTagName("Assertion", "urn:oasis:names:tc:SAML:1.0:assertion");
-            if (assertions.Count == 1)
-            {
-                //TODO::check if proper parent
-                return (XmlElement)assertions[0];
-            }
-            else
-            {
-                RequestSecurityTokenResponseType responseObject;
-                using (var reader = new XmlNodeReader(responseBody))
-                    responseObject = (RequestSecurityTokenResponseType)ChallengeSerializer.Deserialize(reader);
-                return await ProcessChallengeAsync(sessionCert, responseObject, deadline).ConfigureAwait(false);
-            }
+                        var responseBody = new XmlDocument
+                        {
+                            PreserveWhitespace = true
+                        };
+                        using (var reader = responseMsg.GetReaderAtBodyContents()) responseBody.Load(reader);
+
+                        XmlNodeList assertions = responseBody.GetElementsByTagName("Assertion", "urn:oasis:names:tc:SAML:1.0:assertion");
+                        if (assertions.Count == 1)
+                        {
+                            //TODO::check if proper parent
+                            return (XmlElement)assertions[0];
+                        }
+                        else
+                        {
+                            RequestSecurityTokenResponseType responseObject;
+                            using (var reader = new XmlNodeReader(responseBody))
+                                responseObject = (RequestSecurityTokenResponseType)ChallengeSerializer.Deserialize(reader);
+                            return await ProcessChallengeAsync(sessionCert, responseObject, deadline).ConfigureAwait(false);
+                        }
+                    }
+                }
+                catch (Exception) when (OperationScope.Cancellation.IsCancellationRequested)
+                { throw new OperationCanceledException(OperationScope.Cancellation); }
             }
         }
 
@@ -289,18 +300,19 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
                 channel.OperationTimeout = deadline.Remaining;
 
                 //send the (signed) Challenge, get the reponse as message to not break the internal signature
+                using (OperationScope.Cancellation.Register(channel.Abort))
                 using (Message responseMsg = await secondary.ChallengeAsync(new RequestSecurityTokenResponse() { RequestSecurityTokenResponse1 = response }).ConfigureAwait(false))
                 {
-                ValidateMessage(responseMsg);
+                    ValidateMessage(responseMsg);
 
-                var responseBody = new XmlDocument
-                {
-                    PreserveWhitespace = true
-                };
-                using (var reader = responseMsg.GetReaderAtBodyContents()) responseBody.Load(reader);
+                    var responseBody = new XmlDocument
+                    {
+                        PreserveWhitespace = true
+                    };
+                    using (var reader = responseMsg.GetReaderAtBodyContents()) responseBody.Load(reader);
 
-                //TODO::check if correcty wrapped, but for now we do not care.
-                return (XmlElement)responseBody.GetElementsByTagName("Assertion", "urn:oasis:names:tc:SAML:1.0:assertion")[0];
+                    //TODO::check if correcty wrapped, but for now we do not care.
+                    return (XmlElement)responseBody.GetElementsByTagName("Assertion", "urn:oasis:names:tc:SAML:1.0:assertion")[0];
                 }
             }
             finally
@@ -314,7 +326,7 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
         {
             try
             {
-                if (channel.State == CommunicationState.Faulted) channel.Abort();
+                if (channel.State == CommunicationState.Faulted || OperationScope.Cancellation.IsCancellationRequested) channel.Abort();
                 else await Task.Factory.FromAsync((callback, state) => channel.BeginClose(deadline.Remaining, callback, state), channel.EndClose, null).ConfigureAwait(false);
             }
             catch { channel.Abort(); }

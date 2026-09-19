@@ -1,4 +1,4 @@
-﻿/*
+/*
  * This file is part of .Net ETEE for eHealth.
  * Copyright (C) 2014 Egelke
  * 
@@ -89,10 +89,10 @@ namespace Egelke.EHealth.Etee.Crypto
         }
 
         internal TripleWrapper(
-            Level level, 
-            WebKey ownWebKey, 
+            Level level,
+            WebKey ownWebKey,
             ITimestampProvider timestampProvider,
-            ILogger<TripleWrapper> logger = null) 
+            ILogger<TripleWrapper> logger = null)
         {
             if (level == Level.L_Level || level == Level.A_level) throw new ArgumentException("level", "Only levels B, T, LT and LTA are allowed");
             this.logger = logger;
@@ -102,10 +102,10 @@ namespace Egelke.EHealth.Etee.Crypto
         }
 
         internal TripleWrapper(
-            Level level, 
-            X509Certificate2 authentication, 
-            X509Certificate2 signature, 
-            ITimestampProvider timestampProvider, 
+            Level level,
+            X509Certificate2 authentication,
+            X509Certificate2 signature,
+            ITimestampProvider timestampProvider,
             X509Certificate2Collection extraStore,
             ILogger<TripleWrapper> logger = null)
         {
@@ -144,16 +144,24 @@ namespace Egelke.EHealth.Etee.Crypto
             return CompleteWithKeyAsync(sealedData);
         }
 
-        private async Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream sealedData)
+        private Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream sealedData)
+            => OperationPolicy.Default.RunAsync(_ => CompleteWithKeyCoreAsync(sealedData));
+
+        private async Task<TimemarkedResult<Stream>> CompleteWithKeyCoreAsync(Stream sealedData)
         {
             logger?.LogInformation("Completing the provided sealed message with revocation and time info according to the level {0}", this.level);
 
             ITempStreamFactory factory = NewFactory(sealedData);
+            OperationScope.Cancellation.ThrowIfCancellationRequested();
             Stream completed = factory.CreateNew();
-            TimemarkKey timemarkKey = await CompleteAsync(this.level, completed, sealedData, null, null).ConfigureAwait(false);
-            completed.Position = 0;
+            try
+            {
+                TimemarkKey timemarkKey = await CompleteAsync(this.level, completed, sealedData, null, null).ConfigureAwait(false);
+                completed.Position = 0;
 
-            return new TimemarkedResult<Stream>(completed, timemarkKey);
+                return new TimemarkedResult<Stream>(completed, timemarkKey);
+            }
+            catch { completed.Dispose(); throw; }
         }
 
         #endregion
@@ -229,7 +237,10 @@ namespace Egelke.EHealth.Etee.Crypto
             return certs;
         }
 
-        private async Task<Stream> SealAsync(ITempStreamFactory factory, Stream unsealedStream, SecretKey skey, X509Certificate2[] certs, WebKey[] webKeys)
+        private Task<Stream> SealAsync(ITempStreamFactory factory, Stream unsealedStream, SecretKey skey, X509Certificate2[] certs, WebKey[] webKeys)
+            => OperationPolicy.Default.RunAsync(_ => SealCoreAsync(factory, unsealedStream, skey, certs, webKeys));
+
+        private async Task<Stream> SealCoreAsync(ITempStreamFactory factory, Stream unsealedStream, SecretKey skey, X509Certificate2[] certs, WebKey[] webKeys)
         {
             logger?.LogInformation("Sealing message of {0} bytes for {1}/{2} known recipients and {3} unknown recipients to level {4}",
                 unsealedStream.Length, certs?.Length, webKeys?.Length, skey == null ? 0 : 1, this.level);
@@ -254,7 +265,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 unsealedStream.Position = 0;
 
                 //embed the content in the inner signature and add any required info if it uses a different cert.
-                await CompleteAsync(signature == authentication ? (Level?) null : this.level & ~Level.T_Level, innerEmbedded, innerDetached, unsealedStream, signature).ConfigureAwait(false);
+                await CompleteAsync(signature == authentication ? (Level?)null : this.level & ~Level.T_Level, innerEmbedded, innerDetached, unsealedStream, signature).ConfigureAwait(false);
 
                 //prepare to encrypt
                 innerEmbedded.Position = 0;
@@ -285,7 +296,7 @@ namespace Egelke.EHealth.Etee.Crypto
                         if (retry++ < Settings.Default.SignRetries)
                         {
                             logger?.LogWarning(ce, "Failed to put outer signature, starting retry {0}", retry);
-                            System.Threading.Thread.Sleep((int)Math.Pow(10, retry));
+                            await Task.Delay((int)Math.Pow(10, retry), OperationScope.Cancellation).ConfigureAwait(false);
                         }
                         else
                         {
@@ -300,13 +311,17 @@ namespace Egelke.EHealth.Etee.Crypto
 
                 //embed the content in the out signature and add any required info
                 Stream result = factory.CreateNew();
-                await CompleteAsync(this.level, result, outerDetached, encrypted, authentication).ConfigureAwait(false);
+                try
+                {
+                    await CompleteAsync(this.level, result, outerDetached, encrypted, authentication).ConfigureAwait(false);
 
-                //prepare to return the triple wrapped message
-                result.Position = 0;
+                    //prepare to return the triple wrapped message
+                    result.Position = 0;
 
-                //return the triple wrapped message
-                return result;
+                    //return the triple wrapped message
+                    return result;
+                }
+                catch { result.Dispose(); throw; }
             }
         }
 
@@ -405,7 +420,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
             if (webKeys != null)
             {
-                foreach(WebKey webKey in webKeys)
+                foreach (WebKey webKey in webKeys)
                 {
                     encryptGenerator.AddKeyTransRecipient(webKey.BCPublicKey, webKey.Id);
                     logger?.LogDebug("Added web recipient [Algorithm={0}, keyId={1}]", "RSA", webKey.IdString);
@@ -417,7 +432,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 EteeActiveConfig.Seal.EncryptionAlgorithm.FriendlyName, EteeActiveConfig.Seal.EncryptionAlgorithm.Value);
             try
             {
-                clear.CopyTo(encryptingStream);
+                OperationScope.Copy(clear, encryptingStream);
                 logger?.LogDebug("Message encrypted");
             }
             finally
@@ -443,9 +458,9 @@ namespace Egelke.EHealth.Etee.Crypto
             //Copy the content to the output
             Stream contentOut = gen.Open(embedded, parser.SignedContentType.Id, true);
             if (content != null)
-                content.CopyTo(contentOut);
+                OperationScope.Copy(content, contentOut);
             else
-                parser.GetSignedContent().ContentStream.CopyTo(contentOut);
+                OperationScope.Copy(parser.GetSignedContent().ContentStream, contentOut);
 
             //Extract the various data from outer layer
             SignerInformation signerInfo = ExtractSignerInfo(parser);
@@ -461,7 +476,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 timemarkKey.SignerId = signerInfo.SignerID.ExtractSignerId();
 
             //Extract the various data from unsiged attributes of signer info
-            IDictionary<DerObjectIdentifier, object>  unsignedAttributes = signerInfo.UnsignedAttributes != null ? signerInfo.UnsignedAttributes.ToDictionary() : new Dictionary<DerObjectIdentifier, object>();
+            IDictionary<DerObjectIdentifier, object> unsignedAttributes = signerInfo.UnsignedAttributes != null ? signerInfo.UnsignedAttributes.ToDictionary() : new Dictionary<DerObjectIdentifier, object>();
             TimeStampToken tst = ExtractTimestamp(unsignedAttributes);
             RevocationValues revocationInfo = ExtractRevocationInfo(unsignedAttributes);
 
@@ -581,7 +596,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
         }
 
-        
+
 
         private TimeStampToken ExtractTimestamp(IDictionary<DerObjectIdentifier, object> unsignedAttributes)
         {
@@ -727,3 +742,4 @@ namespace Egelke.EHealth.Etee.Crypto
         }
     }
 }
+

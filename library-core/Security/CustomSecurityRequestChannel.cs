@@ -28,6 +28,7 @@ using System.Text;
 using System.Xml;
 using System.IdentityModel.Tokens;
 using System.Threading.Tasks;
+using Egelke.EHealth.Client.Pki;
 
 namespace Egelke.EHealth.Client.Security
 {
@@ -78,7 +79,7 @@ namespace Egelke.EHealth.Client.Security
         /// <summary>
         /// Tracing information to use
         /// </summary>
-        public TracingConfig Tracing {  get; set; }
+        public TracingConfig Tracing { get; set; }
 
         /// <summary>Default deadline, including token acquisition and transport.</summary>
         public TimeSpan SendTimeout { get; set; } = TimeSpan.FromMinutes(1);
@@ -93,7 +94,7 @@ namespace Egelke.EHealth.Client.Security
         /// </summary>
         public Uri Via { get; }
 
-        
+
         /// <summary>
         /// Get the requested property.
         /// </summary>
@@ -338,13 +339,16 @@ namespace Egelke.EHealth.Client.Security
 
         private async Task<Message> RequestAsync(Message message, TimeSpan timeout)
         {
-            var deadline = new RequestDeadline(timeout);
+            var deadline = new RequestDeadline(OperationScope.LimitTimeout(timeout));
             var token = await RequestDeadline.WaitAsync(AcquireTokenAsync(deadline.Remaining), deadline.Remaining).ConfigureAwait(false);
             var wrapped = Wrap(message, token);
-            var response = await Task<Message>.Factory.FromAsync(
-                (callback, state) => _innerChannel.BeginRequest(wrapped, deadline.Remaining, callback, state),
-                _innerChannel.EndRequest, null).ConfigureAwait(false);
-            return Verify(response);
+            using (OperationScope.Cancellation.Register(_innerChannel.Abort))
+            {
+                var response = await Task<Message>.Factory.FromAsync(
+                    (callback, state) => _innerChannel.BeginRequest(wrapped, deadline.Remaining, callback, state),
+                    _innerChannel.EndRequest, null).ConfigureAwait(false);
+                return Verify(response);
+            }
         }
 
         /// <summary>Acquires security credentials without blocking the serialization path.</summary>
@@ -359,10 +363,11 @@ namespace Egelke.EHealth.Client.Security
 
         private Message Wrap(Message message, GenericXmlSecurityToken token)
         {
-            if (Tracing != null) {
+            if (Tracing != null)
+            {
                 var httpRequest = new HttpRequestMessageProperty();
 
-                if (Tracing?.Contact != null) 
+                if (Tracing?.Contact != null)
                     httpRequest.Headers["From"] = Tracing.Contact;
                 httpRequest.Headers["User-Agent"] = Tracing.ToAgent();
 
@@ -392,7 +397,7 @@ namespace Egelke.EHealth.Client.Security
                     XmlDictionaryReader headerReader = message.Headers.GetReaderAtHeader(i);
 
                     var doc = new XmlDocument();
-                    var header = (XmlElement) doc.ReadNode(headerReader);
+                    var header = (XmlElement)doc.ReadNode(headerReader);
 
                     wss.VerifyResponse(header);
 

@@ -26,7 +26,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
 
         public void Write(Stream outStream)
         {
-            input.CopyTo(outStream);
+            Egelke.EHealth.Client.Pki.OperationScope.Copy(input, outStream);
         }
     }
 }

@@ -104,6 +104,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns></returns>
         public static Chain BuildChain(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore)
         {
+            OperationScope.Cancellation.ThrowIfCancellationRequested();
             DateTime now = DateTime.UtcNow;
             if (validationTime > (now + ClockSkewness))
             {
@@ -115,11 +116,12 @@ namespace Egelke.EHealth.Client.Pki
                 if (extraStore != null) x509Chain.ChainPolicy.ExtraStore.AddRange(extraStore);
                 x509Chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
                 x509Chain.ChainPolicy.VerificationTime = validationTime;
-                x509Chain.ChainPolicy.UrlRetrievalTimeout = UrlRetrievalTimeout;
+                x509Chain.ChainPolicy.UrlRetrievalTimeout = OperationScope.LimitTimeout(UrlRetrievalTimeout);
 #if NET5_0_OR_GREATER
                 x509Chain.ChainPolicy.DisableCertificateDownloads = DisableCertificateDownloads;
 #endif
                 x509Chain.Build(cert);
+                OperationScope.Cancellation.ThrowIfCancellationRequested();
 
                 Chain chain = new Chain();
                 foreach (var status in x509Chain.ChainStatus)
@@ -171,7 +173,14 @@ namespace Egelke.EHealth.Client.Pki
         /// <param name="crls">Already known crl's, newly retrieved CRL's will be added here</param>
         /// <param name="ocsps">Already konwn ocsp's, newly retreived OCSP's will be added here</param>
         /// <returns>The chain with all the information about validity</returns>
-        public static async Task<Chain> BuildChainAsync(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<BCAX.CertificateList> crls, IList<BCAO.BasicOcspResponse> ocsps)
+        public static Task<Chain> BuildChainAsync(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<BCAX.CertificateList> crls, IList<BCAO.BasicOcspResponse> ocsps)
+            => BuildChainAsync(cert, validationTime, extraStore, crls, ocsps, CancellationToken.None);
+
+        /// <summary>Builds and validates a chain under the shared admission/deadline policy.</summary>
+        public static Task<Chain> BuildChainAsync(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<BCAX.CertificateList> crls, IList<BCAO.BasicOcspResponse> ocsps, CancellationToken cancellationToken)
+            => OperationPolicy.Default.RunAsync(_ => BuildChainCoreAsync(cert, validationTime, extraStore, crls, ocsps), cancellationToken);
+
+        private static async Task<Chain> BuildChainCoreAsync(X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<BCAX.CertificateList> crls, IList<BCAO.BasicOcspResponse> ocsps)
         {
             Chain chain = cert.BuildChain(validationTime, extraStore);
 
@@ -180,6 +189,7 @@ namespace Egelke.EHealth.Client.Pki
 
             for (int i = 0; i < (chain.ChainElements.Count - 1); i++)
             {
+                OperationScope.Cancellation.ThrowIfCancellationRequested();
                 X509Certificate2 nextCert = chain.ChainElements[i].Certificate;
                 X509Certificate2 nextIssuer = chain.ChainElements[i + 1].Certificate;
 
@@ -218,6 +228,7 @@ namespace Egelke.EHealth.Client.Pki
                     }
                     catch (Exception e)
                     {
+                        OperationScope.Cancellation.ThrowIfCancellationRequested();
                         ocspResponse = null;
                         trace.TraceEvent(TraceEventType.Warning, 0, "OCSP validation of {0} failed, falling back to CRL: {1}", nextCert.Subject, e.Message);
                     }
@@ -255,6 +266,7 @@ namespace Egelke.EHealth.Client.Pki
                 }
                 catch
                 {
+                    OperationScope.Cancellation.ThrowIfCancellationRequested();
                     AddErrorStatus(chain.ChainStatus, chain.ChainElements[i].ChainElementStatus, X509ChainStatusFlags.RevocationStatusUnknown, "Invalid OCSP/CRL found");
                 }
             }
@@ -273,6 +285,7 @@ namespace Egelke.EHealth.Client.Pki
             catch (RevocationException<BCAX.CertificateList>) { throw; }
             catch (Exception error)
             {
+                OperationScope.Cancellation.ThrowIfCancellationRequested();
                 trace.TraceEvent(TraceEventType.Warning, 0, "Cached CRL cannot establish status: {0}", error.Message);
                 return false;
             }
@@ -505,22 +518,28 @@ namespace Egelke.EHealth.Client.Pki
         /// <param name="issuer">The issue certificate of the certificate to get the server info from</param>
         /// <returns>The OCSP response (parsed) or <c>null</c> when none found</returns>
         /// <exception cref="RevocationUnknownException">When the revocation info can be retreived</exception>
-        public static async Task<BCAO.OcspResponse> GetOcspResponseAsync(this X509Certificate2 cert, X509Certificate2 issuer)
+        public static Task<BCAO.OcspResponse> GetOcspResponseAsync(this X509Certificate2 cert, X509Certificate2 issuer)
+            => GetOcspResponseAsync(cert, issuer, OperationScope.Cancellation);
+
+        /// <summary>Downloads OCSP evidence, cancelling only this waiter when a fetch is shared.</summary>
+        public static async Task<BCAO.OcspResponse> GetOcspResponseAsync(this X509Certificate2 cert, X509Certificate2 issuer, CancellationToken cancellationToken)
         {
             Exception lastException = null;
             byte[] ocspReqBytes = null;
             foreach (Uri uri in cert.GetOCSPUris())
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
                     if (ocspReqBytes == null) ocspReqBytes = cert.GetOcspReqBody(issuer).GetEncoded();
 
                     byte[] request = ocspReqBytes;
                     return await ocspDownloads.RunAsync(uri.AbsoluteUri + "|" + issuer.Thumbprint + "|" + cert.SerialNumber,
-                        () => DownloadOcspAsync(uri, request)).ConfigureAwait(false);
+                        token => DownloadOcspAsync(uri, request, token), cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     lastException = e;
                     trace.TraceEvent(TraceEventType.Warning, 0, "Failed to manually obtain ocsp: {0}", e);
                 }
@@ -529,11 +548,12 @@ namespace Egelke.EHealth.Client.Pki
             return null;
         }
 
-        private static async Task<BCAO.OcspResponse> DownloadOcspAsync(Uri uri, byte[] request)
+        private static async Task<BCAO.OcspResponse> DownloadOcspAsync(Uri uri, byte[] request, CancellationToken cancellationToken)
         {
-            using (var cts = new CancellationTokenSource(OcspTimeout))
+            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             using (var content = new ByteArrayContent(request))
             {
+                cts.CancelAfter(OcspTimeout);
                 content.Headers.ContentType = new MediaTypeHeaderValue("application/ocsp-request");
                 using (var response = await http.PostAsync(uri, content, cts.Token).ConfigureAwait(false))
                 {
@@ -606,17 +626,23 @@ namespace Egelke.EHealth.Client.Pki
         /// <param name="cert">the certificat to tge the server info from</param>
         /// <returns>The clr (parsed) or <c>null</c> when none found</returns>
         /// <exception cref="RevocationUnknownException">When the revocation info can be retreived</exception>
-        public static async Task<BCAX.CertificateList> GetCertificateListAsync(this X509Certificate2 cert)
+        public static Task<BCAX.CertificateList> GetCertificateListAsync(this X509Certificate2 cert)
+            => GetCertificateListAsync(cert, OperationScope.Cancellation);
+
+        /// <summary>Downloads a CRL, cancelling only this waiter when a fetch is shared.</summary>
+        public static async Task<BCAX.CertificateList> GetCertificateListAsync(this X509Certificate2 cert, CancellationToken cancellationToken)
         {
             Exception lastException = null;
             foreach (Uri uri in cert.GetCrlWebUris())
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    return await crlDownloads.RunAsync(uri.AbsoluteUri, () => DownloadCrlAsync(uri)).ConfigureAwait(false);
+                    return await crlDownloads.RunAsync(uri.AbsoluteUri, token => DownloadCrlAsync(uri, token), cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     lastException = e;
                     trace.TraceEvent(TraceEventType.Warning, 0, "Failed to manually obtain crl: {0}", e);
                 }
@@ -625,14 +651,17 @@ namespace Egelke.EHealth.Client.Pki
             return null;
         }
 
-        private static async Task<BCAX.CertificateList> DownloadCrlAsync(Uri uri)
+        private static async Task<BCAX.CertificateList> DownloadCrlAsync(Uri uri, CancellationToken cancellationToken)
         {
-            using (var cts = new CancellationTokenSource(CrlTimeout))
-            using (var response = await http.GetAsync(uri, cts.Token).ConfigureAwait(false))
+            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
+                cts.CancelAfter(CrlTimeout);
+                using (var response = await http.GetAsync(uri, cts.Token).ConfigureAwait(false))
+                {
                 VerifyCrlRsp(response);
                 var body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
                 return BCAX.CertificateList.GetInstance(BCA.Asn1Sequence.FromByteArray(body));
+                }
             }
         }
 

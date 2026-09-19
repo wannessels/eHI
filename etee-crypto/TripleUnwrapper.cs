@@ -1,4 +1,4 @@
-﻿/*
+/*
  * This file is part of .Net ETEE for eHealth.
  * Copyright (C) 2014 Egelke
  * 
@@ -61,11 +61,11 @@ namespace Egelke.EHealth.Etee.Crypto
         private readonly ITimemarkProvider timemarkauthority;
 
         internal TripleUnwrapper(
-            Level? level, 
-            ITimemarkProvider timemarkauthority, 
-            X509Certificate2Collection encCerts, 
-            IStore<X509Certificate> authCertStore, 
-            WebKey[] ownWebKeys, 
+            Level? level,
+            ITimemarkProvider timemarkauthority,
+            X509Certificate2Collection encCerts,
+            IStore<X509Certificate> authCertStore,
+            WebKey[] ownWebKeys,
             ILogger<TripleUnwrapper> logger = null)
         {
             if (level == Level.L_Level || level == Level.A_level) throw new ArgumentException("level", "Only null or levels B, T, LT and LTA are allowed");
@@ -77,7 +77,7 @@ namespace Egelke.EHealth.Etee.Crypto
             this.ownKeyPairs = ownWebKeys?.ToDictionary(_ => _.Id, _ => _.BCKeyPair, ArrayEqualityComparer.Instance);
         }
 
-#region DataUnsealer Members
+        #region DataUnsealer Members
 
         public UnsealResult Unseal(Stream sealedData)
         {
@@ -99,9 +99,9 @@ namespace Egelke.EHealth.Etee.Crypto
             return UnsealAsync(sealedData, sender, null);
         }
 
-#endregion
+        #endregion
 
-#region Anonymous Data Unsealer Members
+        #region Anonymous Data Unsealer Members
 
         public UnsealResult Unseal(Stream sealedData, SecretKey key)
         {
@@ -118,7 +118,10 @@ namespace Egelke.EHealth.Etee.Crypto
             return UnsealAsync(sealedData, null, key);
         }
 
-        public async Task<UnsealResult> UnsealAsync(Stream sealedData, WebKey sender, SecretKey key)
+        public Task<UnsealResult> UnsealAsync(Stream sealedData, WebKey sender, SecretKey key)
+            => OperationPolicy.Default.RunAsync(_ => UnsealCoreAsync(sealedData, sender, key));
+
+        private async Task<UnsealResult> UnsealCoreAsync(Stream sealedData, WebKey sender, SecretKey key)
         {
             if (sealedData == null) throw new ArgumentNullException("sealedData");
 
@@ -134,9 +137,9 @@ namespace Egelke.EHealth.Etee.Crypto
             }
         }
 
-#endregion
+        #endregion
 
-#region Data Verifier Members
+        #region Data Verifier Members
 
         public SignatureSecurityInformation Verify(Stream sealedData)
         {
@@ -158,7 +161,10 @@ namespace Egelke.EHealth.Etee.Crypto
             return VerifyAsync(sealedData, sender, this.timemarkauthority);
         }
 
-        private async Task<SignatureSecurityInformation> VerifyAsync(Stream sealedData, WebKey sender, ITimemarkProvider timemark)
+        private Task<SignatureSecurityInformation> VerifyAsync(Stream sealedData, WebKey sender, ITimemarkProvider timemark)
+            => OperationPolicy.Default.RunAsync(_ => VerifyCoreAsync(sealedData, sender, timemark));
+
+        private async Task<SignatureSecurityInformation> VerifyCoreAsync(Stream sealedData, WebKey sender, ITimemarkProvider timemark)
         {
             logger?.LogInformation("Verifying the sealed message {0} bytes according to the level {1}", sealedData.Length, this.level);
 
@@ -205,9 +211,9 @@ namespace Egelke.EHealth.Etee.Crypto
             return new TimemarkedResult<SignatureSecurityInformation>(info, timemarkKey);
         }
 
-#endregion
+        #endregion
 
-#region Tma Data Verifier Members
+        #region Tma Data Verifier Members
 
         public SignatureSecurityInformation Verify(Stream sealedData, DateTime date)
         {
@@ -233,7 +239,7 @@ namespace Egelke.EHealth.Etee.Crypto
             return VerifyWithKeyAsync(sealedData, null, new FixedTimemarkProvider(date));
         }
 
-#endregion
+        #endregion
 
         private async Task<UnsealResult> UnsealAsync(Stream sealedData, SecretKey key, WebKey sender, bool streaming)
         {
@@ -259,13 +265,17 @@ namespace Egelke.EHealth.Etee.Crypto
                     decryptedVerified.Position = 0; //reset the stream
 
                     result.UnsealedData = factory.CreateNew();
-                    result.SecurityInformation.InnerSignature = await (streaming ?
-                        VerifyStreamingAsync(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority) :
-                        VerifyInMemAsync(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority)).ConfigureAwait(false);
+                    try
+                    {
+                        result.SecurityInformation.InnerSignature = await (streaming ?
+                            VerifyStreamingAsync(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority) :
+                            VerifyInMemAsync(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority)).ConfigureAwait(false);
 
-                    result.UnsealedData.Position = 0; //reset the stream
+                        result.UnsealedData.Position = 0; //reset the stream
 
-                    return result;
+                        return result;
+                    }
+                    catch { result.UnsealedData.Dispose(); throw; }
                 }
             }
         }
@@ -287,7 +297,7 @@ namespace Egelke.EHealth.Etee.Crypto
                     throw new InvalidMessageException("The message isn't a triple wrapped message", e);
                 }
 
-                signedData.GetSignedContent().ContentStream.CopyTo(verifiedContent);
+                OperationScope.Copy(signedData.GetSignedContent().ContentStream, verifiedContent);
                 logger?.LogDebug("Copied the signed data & calculated the message digest");
 
                 IStore<X509Certificate> certs = signedData.GetCertificates();
@@ -348,7 +358,8 @@ namespace Egelke.EHealth.Etee.Crypto
             //Check if signed (only allow single signatures)
             SignerInformation signerInfo = null;
             IEnumerator iterator = signerInfos.GetSigners().GetEnumerator();
-            if (!iterator.MoveNext()) {
+            if (!iterator.MoveNext())
+            {
                 result.securityViolations.Add(SecurityViolation.NotSigned);
                 logger?.LogWarning("Although it is a correct CMS file it isn't signed");
                 return result;
@@ -437,7 +448,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 if (outer == null)
                 {
                     //we do not need certificate
-                    ski =  signerInfo.SignerID.ExtractSignerId();
+                    ski = signerInfo.SignerID.ExtractSignerId();
 
                     //we do not have certificate and ski
                     if (ski == null)
@@ -445,7 +456,7 @@ namespace Egelke.EHealth.Etee.Crypto
                         logger?.LogError("The outer signature does not contain any certificates");
                         throw new InvalidMessageException("The outer signature is missing certificates");
                     }
-                    else 
+                    else
                     {
                         result.SubjectId = ski;
                     }
@@ -591,7 +602,8 @@ namespace Egelke.EHealth.Etee.Crypto
                         logger?.LogDebug("Validating the time-stamp against the current time for arbitration reasons");
                         stamp = await tst.ValidateAsync(crls, ocsps, DateTime.UtcNow).ConfigureAwait(false);
                     }
-                    else {
+                    else
+                    {
                         logger?.LogDebug("Validating the time-stamp against the time-stamp time since no arbitration is needed");
                         stamp = await tst.ValidateAsync(crls, ocsps).ConfigureAwait(false);
                     }
@@ -631,7 +643,8 @@ namespace Egelke.EHealth.Etee.Crypto
 
             //calculate the subject status if not copied from the outer signature
             //Note that this is in the end since we need the stuff like CRL/OCSP and signing time.
-            if (result.Subject == null && signerCert != null) {
+            if (result.Subject == null && signerCert != null)
+            {
                 result.Subject = await signerCert.VerifyAsync(signingTime, (outer == null ? new int[] { 0 } : new int[0]),
                     EteeActiveConfig.Unseal.MinimumSignatureKeySize, certs, crls, ocsps).ConfigureAwait(false);
                 result.SubjectId = signerCert.GetSubjectKeyIdentifier();
@@ -649,7 +662,7 @@ namespace Egelke.EHealth.Etee.Crypto
             return result;
         }
 
-      
+
         private SecurityInformation Decrypt(Stream clear, Stream cypher, SecretKey key, DateTime? sealedOn)
         {
             int i;
@@ -674,7 +687,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 }
                 RecipientInformationStore recipientInfos = cypherData.GetRecipientInfos();
                 logger?.LogDebug("Got the recipient info of the encrypted message");
-                
+
                 i = 0;
                 found = false;
                 algos = new StringBuilder();
@@ -735,7 +748,7 @@ namespace Egelke.EHealth.Etee.Crypto
                             encCert = null;
                             result.SubjectId = recipient.RecipientID.ExtractSignerId();
                             recipientKey = ownKeyPairs.ContainsKey(result.SubjectId) ? ownKeyPairs[result.SubjectId]?.Private : null;
-                            
+
                         }
                     }
 
@@ -757,7 +770,7 @@ namespace Egelke.EHealth.Etee.Crypto
                     }
                     else
                     {
-                        if (!CertVerifier.VerifyKeySize((AsymmetricKeyParameter) recipientKey, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey))
+                        if (!CertVerifier.VerifyKeySize((AsymmetricKeyParameter)recipientKey, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey))
                         {
                             result.securityViolations.Add(SecurityViolation.UntrustedSubject);
                             logger?.LogWarning("The receiver asymmetric WebAuth key {0} was less then {0} bits",
@@ -815,7 +828,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
                 try
                 {
-                    clearStream.ContentStream.CopyTo(clear);
+                    OperationScope.Copy(clearStream.ContentStream, clear);
                     logger?.LogDebug("Decrypted the content");
                 }
                 finally
@@ -834,3 +847,4 @@ namespace Egelke.EHealth.Etee.Crypto
 
     }
 }
+

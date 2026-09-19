@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -12,6 +12,7 @@ using System.ServiceModel.Channels;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Xml;
 using System.Xml.Linq;
 using Egelke.EHealth.Client.Pki;
@@ -42,18 +43,17 @@ namespace Egelke.EHealth.Client.Services.Kgss
             };
         }
 
-        public SecretKey GetNewKey(params CredentialType[] allowed)
-        {
-            var req = BuildGetNewKeyRequest(EncryptForService(CreateGetNewKeyRequestContent(allowed)), allowed);
-            var rsp = Channel.GetNewKey(req)?.GetNewKeyResponse;
-            CheckGetNewKeyResponse(rsp);
-            return ParseGetNewKeyResponseContent(Decrypt<XmlElement>(rsp.SealedNewKeyResponse.SealedContent));
-        }
+        public SecretKey GetNewKey(params CredentialType[] allowed) => GetNewKeyAsync(allowed).ConfigureAwait(false).GetAwaiter().GetResult();
 
-        public async Task<SecretKey> GetNewKeyAsync(params CredentialType[] allowed)
+        public Task<SecretKey> GetNewKeyAsync(params CredentialType[] allowed) => GetNewKeyAsync(CancellationToken.None, allowed);
+
+        public Task<SecretKey> GetNewKeyAsync(CancellationToken cancellationToken, params CredentialType[] allowed)
+            => RunOperationAsync(() => GetNewKeyCoreAsync(allowed), cancellationToken);
+
+        private async Task<SecretKey> GetNewKeyCoreAsync(CredentialType[] allowed)
         {
             var req = BuildGetNewKeyRequest(await EncryptForServiceAsync(CreateGetNewKeyRequestContent(allowed)).ConfigureAwait(false), allowed);
-            var rsp = (await Channel.GetNewKeyAsync(req).ConfigureAwait(false))?.GetNewKeyResponse;
+            var rsp = (await SendAsync(() => Channel.GetNewKeyAsync(req)).ConfigureAwait(false))?.GetNewKeyResponse;
             CheckGetNewKeyResponse(rsp);
             return ParseGetNewKeyResponseContent(await DecryptAsync<XmlElement>(rsp.SealedNewKeyResponse.SealedContent).ConfigureAwait(false));
         }
@@ -88,18 +88,17 @@ namespace Egelke.EHealth.Client.Services.Kgss
             _logger.LogInformation("Received New Key from KGSS with response id {0}", rsp?.Id);
         }
 
-        public SecretKey GetKey(byte[] id)
-        {
-            var req = BuildGetKeyRequest(EncryptForService(CreateGetKeyRequestContent(id)), id);
-            var rsp = Channel.GetKey(req)?.GetKeyResponse;
-            CheckGetKeyResponse(rsp);
-            return new SecretKey(id, ParseGetKeyResponseContent(Decrypt<XmlElement>(rsp.SealedKeyResponse.SealedContent)));
-        }
+        public SecretKey GetKey(byte[] id) => GetKeyAsync(id).ConfigureAwait(false).GetAwaiter().GetResult();
 
-        public async Task<SecretKey> GetKeyAsync(byte[] id)
+        public Task<SecretKey> GetKeyAsync(byte[] id) => GetKeyAsync(id, CancellationToken.None);
+
+        public Task<SecretKey> GetKeyAsync(byte[] id, CancellationToken cancellationToken)
+            => RunOperationAsync(() => GetKeyCoreAsync(id), cancellationToken);
+
+        private async Task<SecretKey> GetKeyCoreAsync(byte[] id)
         {
             var req = BuildGetKeyRequest(await EncryptForServiceAsync(CreateGetKeyRequestContent(id)).ConfigureAwait(false), id);
-            var rsp = (await Channel.GetKeyAsync(req).ConfigureAwait(false))?.GetKeyResponse;
+            var rsp = (await SendAsync(() => Channel.GetKeyAsync(req)).ConfigureAwait(false))?.GetKeyResponse;
             CheckGetKeyResponse(rsp);
             return new SecretKey(id, ParseGetKeyResponseContent(await DecryptAsync<XmlElement>(rsp.SealedKeyResponse.SealedContent).ConfigureAwait(false)));
         }
@@ -195,3 +194,5 @@ namespace Egelke.EHealth.Client.Services.Kgss
 
     }
 }
+
+

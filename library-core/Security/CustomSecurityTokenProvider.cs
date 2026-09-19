@@ -19,6 +19,7 @@
 using System;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
+using System.Threading;
 using Egelke.EHealth.Client.Pki;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -62,7 +63,7 @@ namespace Egelke.EHealth.Client.Security
         public CustomSecurityTokenProvider(SecurityTokenRequirement tokenRequirement, X509Certificate2 idCert, ILogger<CustomSecurity> logger)
         {
             _logger = logger;
-            _wss = (WSS) tokenRequirement.Properties["wss"];
+            _wss = (WSS)tokenRequirement.Properties["wss"];
             _tokenRequirement = tokenRequirement;
             _tokenRequirement.TryGetProperty<CustomIssuedSecurityTokenParameters>(CustomIssuedSecurityTokenParameters.IssuedSecurityTokenParametersProperty, out _tokenParams);
             _idCert = idCert;
@@ -105,13 +106,14 @@ namespace Egelke.EHealth.Client.Security
         /// frameworks and can therefor not be used by the custom applied message implementation.
         /// </remarks>
         /// <returns>The generic xml version of the token</returns>
-        protected SecurityToken CreateX509CertificateToken() {
+        protected SecurityToken CreateX509CertificateToken()
+        {
             String id = "urn:uuid:" + Guid.NewGuid().ToString();
 
             XmlDocument doc = new XmlDocument();
 
             XmlElement bst = doc.CreateElement(_wss.SecExtPrefix, "BinarySecurityToken", WSS.SECEXT10_NS);
-            XmlAttribute bstId = doc.CreateAttribute(_wss.UtilityPrefix, "Id", WSS.UTILITY_NS );
+            XmlAttribute bstId = doc.CreateAttribute(_wss.UtilityPrefix, "Id", WSS.UTILITY_NS);
             bstId.Value = id;
             bst.Attributes.Append(bstId);
             XmlAttribute bstValueType = doc.CreateAttribute("ValueType");
@@ -168,27 +170,40 @@ namespace Egelke.EHealth.Client.Security
             }
         }
 
-        private Task<SecurityToken> GetSamlHokTokenAsync(TimeSpan timeout)
+        private async Task<SecurityToken> GetSamlHokTokenAsync(TimeSpan timeout)
         {
             var cache = _tokenParams.Cache;
             var tokenId = _tokenParams.ToId(_idCert);
             var token = cache.Get<SecurityToken>(tokenId);
-            if (IsUsable(token)) return Task.FromResult(token);
+            if (IsUsable(token)) return token;
             var flight = flights.GetValue(cache, _ => new AsyncSingleFlight<string, SecurityToken>());
-            return RequestDeadline.WaitAsync(flight.RunAsync(tokenId, async () =>
+            using (var waiter = CancellationTokenSource.CreateLinkedTokenSource(OperationScope.Cancellation))
             {
-                token = cache.Get<SecurityToken>(tokenId);
-                if (IsUsable(token)) return token;
-                token = token == null
-                    ? await CreateSamlHokTokenAsync(timeout).ConfigureAwait(false)
-                    : await RenewSamlHokTokenAsync(token, timeout).ConfigureAwait(false);
-                cache.Set(tokenId, token, new MemoryCacheEntryOptions
+                waiter.CancelAfter(OperationScope.LimitTimeout(timeout));
+                try
                 {
-                    Size = 1,
-                    AbsoluteExpiration = token.ValidTo.AddHours(1)
-                });
-                return token;
-            }), timeout);
+                    return await flight.RunAsync(tokenId, async cancellationToken =>
+                    {
+                        var flightTimeout = _tokenParams.IssuerBinding?.SendTimeout ?? TimeSpan.FromMinutes(1);
+                        using (var scope = new OperationScope(cancellationToken, flightTimeout, inherit: false))
+                        {
+                            token = cache.Get<SecurityToken>(tokenId);
+                            if (IsUsable(token)) return token;
+                            token = token == null
+                            ? await CreateSamlHokTokenAsync(flightTimeout).ConfigureAwait(false)
+                            : await RenewSamlHokTokenAsync(token, flightTimeout).ConfigureAwait(false);
+                            cache.Set(tokenId, token, new MemoryCacheEntryOptions
+                            {
+                                Size = 1,
+                                AbsoluteExpiration = token.ValidTo.AddHours(1)
+                            });
+                            return token;
+                        }
+                    }, waiter.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!OperationScope.Cancellation.IsCancellationRequested)
+                { throw new TimeoutException("Token acquisition exceeded the operation deadline"); }
+            }
         }
 
         private static bool IsUsable(SecurityToken token)

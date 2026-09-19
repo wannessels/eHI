@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.ServiceModel;
@@ -6,6 +6,7 @@ using System.ServiceModel.Channels;
 using System.ServiceModel.Description;
 using System.Text;
 using System.Threading.Tasks;
+using System.Threading;
 using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Etee.Crypto;
 using Microsoft.Extensions.Logging;
@@ -23,16 +24,18 @@ namespace Egelke.EHealth.Client.Services.EtkDepot
 
         }
 
-        public EncryptionToken[] GetEtk(params IdentifierType[] searchCriteria)
-        {
-            var req = BuildRequest(searchCriteria);
-            return ParseResponse(Channel.GetEtk(req)?.GetEtkResponse);
-        }
+        public EncryptionToken[] GetEtk(params IdentifierType[] searchCriteria) => GetEtkAsync(searchCriteria).ConfigureAwait(false).GetAwaiter().GetResult();
 
-        public async Task<EncryptionToken[]> GetEtkAsync(params IdentifierType[] searchCriteria)
+        public Task<EncryptionToken[]> GetEtkAsync(params IdentifierType[] searchCriteria)
+            => GetEtkAsync(CancellationToken.None, searchCriteria);
+
+        public Task<EncryptionToken[]> GetEtkAsync(CancellationToken cancellationToken, params IdentifierType[] searchCriteria)
+            => RunOperationAsync(() => GetEtkCoreAsync(searchCriteria), cancellationToken);
+
+        private async Task<EncryptionToken[]> GetEtkCoreAsync(IdentifierType[] searchCriteria)
         {
             var req = BuildRequest(searchCriteria);
-            return ParseResponse((await Channel.GetEtkAsync(req).ConfigureAwait(false))?.GetEtkResponse);
+            return ParseResponse((await SendAsync(() => Channel.GetEtkAsync(req)).ConfigureAwait(false))?.GetEtkResponse);
         }
 
         private GetEtkRequest1 BuildRequest(IdentifierType[] searchCriteria)
@@ -92,3 +95,5 @@ namespace Egelke.EHealth.Client.Services.EtkDepot
         }
     }
 }
+
+
