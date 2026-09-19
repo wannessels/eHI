@@ -10,6 +10,8 @@ The default is `false`. Enable at startup to use platform `RSA.SignHash` for cer
 
 Native RSA key providers must support PSS. Unsupported providers fail rather than silently switching the signature algorithm. Disable the flag to restore the existing BouncyCastle path. ECDSA behavior is unchanged, native keys are synchronized during signing, and caller-owned WebKey/certificate objects remain owned by the caller.
 
+Factory-created sealers own cached native handles. For a directly held sealer, call `(sealer as IDisposable)?.Dispose()` after its active operations finish. Service clients retire and dispose their owned sealers automatically.
+
 ## Admission, cancellation and caching
 
 Use one shared policy for clients belonging to the same application capacity budget:

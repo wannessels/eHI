@@ -20,3 +20,6 @@ NIHII*.*p12
 *.pwd
 *.pin
 *.ssin
+
+# Local profiling build logs and scratch results; reviewed results live in benchmarks/results.
+/artifacts/profiling/
