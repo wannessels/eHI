@@ -22,10 +22,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using Org.BouncyCastle.Tsp;
 using System.IO;
 using System.Security.Cryptography;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Egelke.EHealth.Client.Pki
@@ -38,9 +41,15 @@ namespace Egelke.EHealth.Client.Pki
     /// </remarks>
     public class Rfc3161TimestampProvider : ITimestampProviderAsync
     {
-        private TraceSource trace = new TraceSource("Egelke.EHealth.Tsa");
+        private static readonly TraceSource trace = new TraceSource("Egelke.EHealth.Tsa");
+        private static readonly HttpClient http = new HttpClient() { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
 
         private Uri address;
+
+        /// <summary>
+        /// Maximum time to wait for the TSA, defaults to 10 seconds.
+        /// </summary>
+        public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(10);
 
         /// <summary>
         /// Constructor that has the Fedict TSA as destination.
@@ -72,25 +81,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <exception cref="TspValidationException">When the TSA returns an invalid time-stamp response</exception>
         public byte[] GetTimestampFromDocumentHash(byte[] hash, string digestMethod)
         {
-            TimeStampRequest tspReq = CreateRfc3161RequestBody(hash, digestMethod);
-
-            Stream postStream;
-            byte[] tsprBytes = tspReq.GetEncoded();
-            HttpWebRequest post = CreateRfc3161WebRequest(tsprBytes, out postStream);
-            trace.TraceEvent(TraceEventType.Information, 0, "retrieving time-stamp of {0} from {1}", Convert.ToBase64String(hash), address);
-
-            postStream.Write(tsprBytes, 0, tsprBytes.Length);
-
-            using (var response = (HttpWebResponse)post.GetResponse())
-            {
-                Stream responseStream = response.GetResponseStream();
-
-                CheckRfc3161WebResponse(response);
-
-                MemoryStream rspStream = new MemoryStream();
-                responseStream.CopyTo(rspStream);
-                return ParseRfc3161ResponseBody(rspStream.ToArray(), tspReq);
-            }
+            return GetTimestampFromDocumentHashAsync(hash, digestMethod).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -104,24 +95,19 @@ namespace Egelke.EHealth.Client.Pki
         public async Task<byte[]> GetTimestampFromDocumentHashAsync(byte[] hash, string digestMethod)
         {
             TimeStampRequest tspReq = CreateRfc3161RequestBody(hash, digestMethod);
-
-            Stream postStream;
             byte[] tsprBytes = tspReq.GetEncoded();
-            HttpWebRequest post = CreateRfc3161WebRequest(tsprBytes, out postStream);
             trace.TraceEvent(TraceEventType.Information, 0, "retrieving time-stamp of {0} from {1}", Convert.ToBase64String(hash), address);
-            
-            await postStream.WriteAsync(tsprBytes, 0, tsprBytes.Length);
 
-            using (var response = (HttpWebResponse)post.GetResponse())
+            using (var cts = new CancellationTokenSource(Timeout))
+            using (var content = new ByteArrayContent(tsprBytes))
             {
-                MemoryStream rspStream = new MemoryStream();
-                Task rspCopy = response.GetResponseStream().CopyToAsync(rspStream);
-
-                CheckRfc3161WebResponse(response);
-
-                await rspCopy;
-
-                return ParseRfc3161ResponseBody(rspStream.ToArray(), tspReq);
+                content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-query");
+                using (HttpResponseMessage response = await http.PostAsync(address, content, cts.Token).ConfigureAwait(false))
+                {
+                    CheckRfc3161WebResponse(response);
+                    byte[] body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                    return ParseRfc3161ResponseBody(body, tspReq);
+                }
             }
         }
 
@@ -134,24 +120,13 @@ namespace Egelke.EHealth.Client.Pki
             return tsprg.Generate(digestOid, hash);
         }
 
-        private HttpWebRequest CreateRfc3161WebRequest(byte[] tspr, out Stream postStream)
+        private void CheckRfc3161WebResponse(HttpResponseMessage webResponse)
         {
-            var post = (HttpWebRequest)WebRequest.Create(address);
-            post.ContentType = "application/timestamp-query";
-            post.Method = "POST";
-            post.ContentLength = tspr.Length;
-            postStream = post.GetRequestStream();
-            return post;
-        }
-
-        private void CheckRfc3161WebResponse(HttpWebResponse webResponse)
-        {
-
             if (webResponse.StatusCode != HttpStatusCode.OK
-                || webResponse.ContentType != "application/timestamp-reply")
+                || webResponse.Content?.Headers.ContentType?.MediaType != "application/timestamp-reply")
             {
-                trace.TraceEvent(TraceEventType.Error, 0, "Invalid http status or content for time-stamp reply: " + webResponse.StatusDescription);
-                throw new ApplicationException("Response with invalid status or content type of the TSA: " + webResponse.StatusDescription);
+                trace.TraceEvent(TraceEventType.Error, 0, "Invalid http status or content for time-stamp reply: " + webResponse.ReasonPhrase);
+                throw new ApplicationException("Response with invalid status or content type of the TSA: " + webResponse.ReasonPhrase);
             }
         }
 
@@ -167,7 +142,7 @@ namespace Egelke.EHealth.Client.Pki
             catch (Exception e)
             {
                 trace.TraceEvent(TraceEventType.Error, 0, "The time-stamp response does not correspond with the request: {0}", e.Message);
-                throw e;
+                throw;
             }
 
             return tsResponse.TimeStampToken.GetEncoded();
