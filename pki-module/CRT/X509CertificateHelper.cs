@@ -158,12 +158,18 @@ namespace Egelke.EHealth.Client.Pki
                     try
                     {
                         ocspResponse = nextCert.Verify(nextIssuer, validationTime, ocsps);
+                        if (ocspResponse == null && RevocationCache.TryGetOcsp(nextCert, nextIssuer, out BCAO.BasicOcspResponse cachedOcsp))
+                        {
+                            ocsps.Add(cachedOcsp);
+                            ocspResponse = nextCert.Verify(nextIssuer, validationTime, ocsps);
+                        }
                         if (ocspResponse == null)
                         {
                             BCAO.OcspResponse ocspMsg = await nextCert.GetOcspResponseAsync(nextIssuer).ConfigureAwait(false);
                             if (ocspMsg != null)
                             {
                                 ocspResponse = BCAO.BasicOcspResponse.GetInstance(BCA.Asn1Object.FromByteArray(ocspMsg.ResponseBytes.Response.GetOctets()));
+                                RevocationCache.PutOcsp(nextCert, nextIssuer, ocspResponse);
                                 ocsps.Add(ocspResponse);
                                 ocspResponse = nextCert.Verify(nextIssuer, validationTime, ocsps);
                             }
@@ -181,11 +187,17 @@ namespace Egelke.EHealth.Client.Pki
                     if (ocspResponse == null)
                     {
                         BCAX.CertificateList crl = nextCert.Verify(nextIssuer, validationTime, crls);
+                        if (crl == null && RevocationCache.TryGetCrl(nextCert, out BCAX.CertificateList cachedCrl))
+                        {
+                            crls.Add(cachedCrl);
+                            crl = nextCert.Verify(nextIssuer, validationTime, crls);
+                        }
                         if (crl == null)
                         {
                             crl = await nextCert.GetCertificateListAsync().ConfigureAwait(false);
                             if (crl != null)
                             {
+                                RevocationCache.PutCrl(nextCert, crl);
                                 crls.Add(crl);
                                 crl = nextCert.Verify(nextIssuer, validationTime, crls);
                             }
@@ -345,17 +357,17 @@ namespace Egelke.EHealth.Client.Pki
             BCX.X509Certificate certificateBC = DotNetUtilities.FromX509Certificate(certificate);
             BCX.X509Certificate issuerBC = DotNetUtilities.FromX509Certificate(issuer);
 
-            ValueWithRef<BCX.X509Crl, BCAX.CertificateList> crlWithOrg = certLists
-                .Select((c) => new ValueWithRef<BCX.X509Crl, BCAX.CertificateList>(new BCX.X509Crl(c), c)) //convert, keep orginal
-                .Where((c) => c.Value.IssuerDN.Equals(certificateBC.IssuerDN))
-                .Where((c) => c.Value.ThisUpdate >= minTime || (c.Value.NextUpdate != null && c.Value.NextUpdate.Value >= minTime))
-                .OrderByDescending((c) => c.Value.ThisUpdate)
+            ValueWithRef<ParsedCrl, BCAX.CertificateList> crlWithOrg = certLists
+                .Select((c) => new ValueWithRef<ParsedCrl, BCAX.CertificateList>(ParsedCrl.Get(c), c)) //convert, keep orginal
+                .Where((c) => c.Value.Crl.IssuerDN.Equals(certificateBC.IssuerDN))
+                .Where((c) => c.Value.Crl.ThisUpdate >= minTime || (c.Value.Crl.NextUpdate != null && c.Value.Crl.NextUpdate.Value >= minTime))
+                .OrderByDescending((c) => c.Value.Crl.ThisUpdate)
                 .FirstOrDefault();
 
             if (crlWithOrg == null)
                 return null;
 
-            BCX.X509Crl crl = crlWithOrg.Value;
+            ParsedCrl crl = crlWithOrg.Value;
             BCAX.CertificateList certList = crlWithOrg.Reference;
 
             //check the signature (no need the check the issuer here)
