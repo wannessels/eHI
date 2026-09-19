@@ -48,15 +48,16 @@ namespace Egelke.EHealth.Etee.Crypto
             throw new ArgumentException("Unsupported algorithm specified", "privateKey");
         }
 
-        private AsymmetricAlgorithm key;
+        private readonly AsymmetricAlgorithm key;
+        private readonly Lazy<AsymmetricCipherKeyPair> bcKeyPair;
+        private readonly Lazy<AsymmetricKeyParameter> bcPublicKey;
 
         /// <summary>
         /// Constructor for the Object representation of the WebKey.
         /// </summary>
         public WebKey(AsymmetricAlgorithm key)
+            : this(new SubjectKeyIdentifierStructure(ToBCPublicKey(key)).GetKeyIdentifier(), key)
         {
-            this.Id = new SubjectKeyIdentifierStructure(ToBCPublicKey(key)).GetKeyIdentifier();
-            this.key = key;
         }
 
         /* TODO::When activate when we know the format the public key service returns.
@@ -81,6 +82,8 @@ namespace Egelke.EHealth.Etee.Crypto
         {
             this.Id = id;
             this.key = key;
+            bcKeyPair = new Lazy<AsymmetricCipherKeyPair>(() => DotNetUtilities.GetKeyPair(key));
+            bcPublicKey = new Lazy<AsymmetricKeyParameter>(() => ToBCPublicKey(key));
         }
 
 
@@ -115,10 +118,10 @@ namespace Egelke.EHealth.Etee.Crypto
         public String IdString => Convert.ToBase64String(Id);
 
 
-        internal AsymmetricCipherKeyPair BCKeyPair => DotNetUtilities.GetKeyPair(key);
+        internal AsymmetricCipherKeyPair BCKeyPair => bcKeyPair.Value;
 
 
-        internal AsymmetricKeyParameter BCPublicKey => ToBCPublicKey(key);
+        internal AsymmetricKeyParameter BCPublicKey => bcPublicKey.Value;
 
 
     }

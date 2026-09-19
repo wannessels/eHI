@@ -26,6 +26,7 @@ using Egelke.EHealth.Etee.Crypto.Configuration;
 using Egelke.EHealth.Etee.Crypto.Utils;
 using BC = Org.BouncyCastle;
 using System;
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Collections;
 using Org.BouncyCastle.Asn1;
@@ -66,6 +67,14 @@ namespace Egelke.EHealth.Etee.Crypto
         private ITimestampProvider timestampProvider;
 
         private X509Certificate2Collection extraStore;
+
+        private readonly ConcurrentDictionary<X509Certificate2, Lazy<Signer>> signers = new ConcurrentDictionary<X509Certificate2, Lazy<Signer>>();
+
+        private sealed class Signer
+        {
+            public BC::X509.X509Certificate Certificate { get; set; }
+            public BC.Crypto.ISignatureFactory SignatureFactory { get; set; }
+        }
 
         internal TripleWrapper(
             Level level, 
@@ -250,36 +259,48 @@ namespace Egelke.EHealth.Etee.Crypto
             }
         }
 
-        protected void SignDetached(Stream signed, Stream unsigned, X509Certificate2 selectedCert)
+        private Signer GetSigner(X509Certificate2 selectedCert)
         {
-            BC::X509.X509Certificate bcSelectedCert = DotNetUtilities.FromX509Certificate(selectedCert);
-            logger?.LogInformation("Signing the message in name of {0}", selectedCert.Subject);
+            return signers.GetOrAdd(selectedCert, cert => new Lazy<Signer>(() => CreateSigner(cert))).Value;
+        }
+
+        private Signer CreateSigner(X509Certificate2 selectedCert)
+        {
+            var signer = new Signer { Certificate = DotNetUtilities.FromX509Certificate(selectedCert) };
 
             SignatureAlgorithm signAlgo;
-            BC.Crypto.ISignatureFactory sigFactory = null;
-            AsymmetricAlgorithm key = (AsymmetricAlgorithm) selectedCert.GetECDsaPrivateKey() ?? selectedCert.GetRSAPrivateKey();
+            AsymmetricAlgorithm key = (AsymmetricAlgorithm)selectedCert.GetECDsaPrivateKey() ?? selectedCert.GetRSAPrivateKey();
             if (key is RSA rsaKey)
             {
                 try
                 {
                     signAlgo = EteeActiveConfig.Seal.NativeSignatureAlgorithm;
                     BC::Crypto.AsymmetricCipherKeyPair keyPair = DotNetUtilities.GetRsaKeyPair(rsaKey);
-                    sigFactory = new Asn1SignatureFactory(signAlgo.Algorithm.FriendlyName, keyPair.Private);
-                } 
+                    signer.SignatureFactory = new Asn1SignatureFactory(signAlgo.Algorithm.FriendlyName, keyPair.Private);
+                    key.Dispose();
+                }
                 catch (CryptographicException e)
                 {
                     logger?.LogDebug(0, e, "Failed to export key");
                     signAlgo = EteeActiveConfig.Seal.WindowsSignatureAlgorithm;
-                    sigFactory = new WinSignatureFactory(signAlgo.Algorithm, signAlgo.DigestAlgorithm, key);
+                    signer.SignatureFactory = new WinSignatureFactory(signAlgo.Algorithm, signAlgo.DigestAlgorithm, key);
                 }
             }
-            if (key is ECDsa ecdsaKey) {
+            if (key is ECDsa ecdsaKey)
+            {
                 signAlgo = EteeActiveConfig.Seal.ECSignatureAlgorithm;
-                sigFactory = new WinSignatureFactory(signAlgo.Algorithm, signAlgo.DigestAlgorithm, ecdsaKey);
+                signer.SignatureFactory = new WinSignatureFactory(signAlgo.Algorithm, signAlgo.DigestAlgorithm, ecdsaKey);
             }
+            return signer;
+        }
+
+        protected void SignDetached(Stream signed, Stream unsigned, X509Certificate2 selectedCert)
+        {
+            logger?.LogInformation("Signing the message in name of {0}", selectedCert.Subject);
+            Signer signer = GetSigner(selectedCert);
 
             SignerInfoGenerator sigInfoGen = new SignerInfoGeneratorBuilder()
-                .Build(sigFactory, bcSelectedCert);
+                .Build(signer.SignatureFactory, signer.Certificate);
 
             CmsSignedDataGenerator cmsSignedDataGen = new CmsSignedDataGenerator();
             cmsSignedDataGen.AddSignerInfoGenerator(sigInfoGen);

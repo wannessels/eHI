@@ -57,6 +57,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
         private byte[] content;
         private CmsSignedData raw;
+        private X509Certificate2 certificate;
 
         /// <summary>
         /// Constructor for the string representation of the ETK. 
@@ -76,9 +77,16 @@ namespace Egelke.EHealth.Etee.Crypto
             raw = new CmsSignedData(data);
         }
 
+        /// <summary>
+        /// The encryption certificate inside the ETK.
+        /// </summary>
+        /// <remarks>
+        /// The same instance is returned on each call, do not dispose it.
+        /// </remarks>
         public X509Certificate2 ToCertificate()
         {
-            return new X509Certificate2(Content);
+            if (certificate == null) certificate = new X509Certificate2(Content);
+            return certificate;
         }
 
         /// <summary>

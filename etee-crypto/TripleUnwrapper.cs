@@ -679,7 +679,7 @@ namespace Egelke.EHealth.Etee.Crypto
                                 {
                                     recipientInfo = recipient;
                                     encCert = match;
-                                    recipientKey = DotNetUtilities.GetKeyPair(match.PrivateKey).Private;
+                                    recipientKey = encCertStore.GetKeyPair(match).Private;
                                 }
                             }
                         }

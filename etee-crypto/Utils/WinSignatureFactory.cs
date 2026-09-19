@@ -16,8 +16,6 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
 
         private readonly Oid hashOid;
 
-        private readonly HashAlgorithm hashAlgorithm;
-
         private readonly AsymmetricAlgorithm privateKey;
 
         public WinSignatureFactory(Oid algOid, Oid hashOid, AsymmetricAlgorithm privateKey)
@@ -26,7 +24,6 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             algID = new AlgorithmIdentifier(doid); //we assume no params.
 
             this.hashOid = hashOid;
-            hashAlgorithm = HashAlgorithm.Create(hashOid.FriendlyName);
             this.privateKey = privateKey;
         }
 
@@ -34,7 +31,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
 
         public IStreamCalculator<IBlockResult> CreateCalculator()
         {
-            return new WinStreamCalculator(hashOid, hashAlgorithm, privateKey);
+            return new WinStreamCalculator(hashOid, HashAlgorithm.Create(hashOid.FriendlyName), privateKey);
         }
     }
 }

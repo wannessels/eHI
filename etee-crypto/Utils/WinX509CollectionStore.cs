@@ -1,8 +1,12 @@
-﻿using Org.BouncyCastle.Security;
+﻿using Org.BouncyCastle.Crypto;
+using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Utilities.Collections;
 using Org.BouncyCastle.X509.Store;
+using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using BC = Org.BouncyCastle.X509;
 
@@ -12,6 +16,18 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
     {
         private X509Certificate2Collection win;
         private IList<BC::X509Certificate> bc;
+        private readonly ConcurrentDictionary<X509Certificate2, Lazy<AsymmetricCipherKeyPair>> keyPairs = new ConcurrentDictionary<X509Certificate2, Lazy<AsymmetricCipherKeyPair>>();
+
+        public AsymmetricCipherKeyPair GetKeyPair(X509Certificate2 cert)
+        {
+            return keyPairs.GetOrAdd(cert, c => new Lazy<AsymmetricCipherKeyPair>(() =>
+            {
+                using (RSA rsa = c.GetRSAPrivateKey())
+                {
+                    return DotNetUtilities.GetRsaKeyPair(rsa);
+                }
+            })).Value;
+        }
 
         public WinX509CollectionStore(X509Certificate2Collection collection)
         {
