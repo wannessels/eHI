@@ -19,6 +19,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         private readonly HashAlgorithm hashAlgorithm;
 
         private readonly AsymmetricAlgorithm privateKey;
+        private byte[] signatureValue;
 
         public WinSignatureResult(Oid hashOid, HashAlgorithm hashAlgorithm, AsymmetricAlgorithm privateKey)
         {
@@ -28,6 +29,19 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         }
 
         public byte[] Collect()
+        {
+            // Factories are reused across operations; native key implementations need not be thread safe.
+            lock (privateKey)
+            {
+                if (signatureValue == null)
+                {
+                    using (hashAlgorithm) signatureValue = Sign();
+                }
+                return (byte[])signatureValue.Clone();
+            }
+        }
+
+        private byte[] Sign()
         {
             if (privateKey is RSA rsaKey)
             {

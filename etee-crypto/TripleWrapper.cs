@@ -51,7 +51,7 @@ using Org.BouncyCastle.Crypto;
 
 namespace Egelke.EHealth.Etee.Crypto
 {
-    internal class TripleWrapper : IDataSealer, IDataCompleter, ITmaDataCompleter
+    internal class TripleWrapper : IDataSealer, IDataCompleter, ITmaDataCompleter, IDisposable
     {
         // BouncyCastle defaults to 1000 byte BER octet chunks
         private const int StreamBufferSize = 64 * 1024;
@@ -78,6 +78,14 @@ namespace Egelke.EHealth.Etee.Crypto
         {
             public BC::X509.X509Certificate Certificate { get; set; }
             public BC.Crypto.ISignatureFactory SignatureFactory { get; set; }
+            public AsymmetricAlgorithm OwnedKey { get; set; }
+        }
+
+        public void Dispose()
+        {
+            foreach (var signer in signers.Values)
+                if (signer.IsValueCreated) signer.Value.OwnedKey?.Dispose();
+            signers.Clear();
         }
 
         internal TripleWrapper(
@@ -327,12 +335,14 @@ namespace Egelke.EHealth.Etee.Crypto
                     logger?.LogDebug(0, e, "Failed to export key");
                     signAlgo = EteeActiveConfig.Seal.WindowsSignatureAlgorithm;
                     signer.SignatureFactory = new WinSignatureFactory(signAlgo.Algorithm, signAlgo.DigestAlgorithm, key);
+                    signer.OwnedKey = key;
                 }
             }
             if (key is ECDsa ecdsaKey)
             {
                 signAlgo = EteeActiveConfig.Seal.ECSignatureAlgorithm;
                 signer.SignatureFactory = new WinSignatureFactory(signAlgo.Algorithm, signAlgo.DigestAlgorithm, ecdsaKey);
+                signer.OwnedKey = key;
             }
             return signer;
         }

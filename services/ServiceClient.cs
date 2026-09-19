@@ -4,6 +4,7 @@ using System.IdentityModel.Claims;
 using System.IO;
 using System.Linq;
 using System.Security;
+using System.Security.Cryptography.X509Certificates;
 using System.ServiceModel;
 using System.ServiceModel.Channels;
 using System.Text;
@@ -18,12 +19,20 @@ using Egelke.EHealth.Etee.Crypto.Receiver;
 using Egelke.EHealth.Etee.Crypto.Sender;
 using Egelke.EHealth.Etee.Crypto.Status;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Egelke.EHealth.Client.Services
 {
     public class ServiceClient<Port> : ClientBase<Port> where Port : class
     {
         protected readonly ILogger<ServiceClient<Port>> _logger;
+
+        private readonly ResourceCache<Tuple<Level, X509Certificate2>, IDataSealer> sealers =
+            new ResourceCache<Tuple<Level, X509Certificate2>, IDataSealer>((a, b) => a.Item1 == b.Item1 && ReferenceEquals(a.Item2, b.Item2));
+        private readonly ResourceCache<EHealthP12[], IDataUnsealer> unsealers =
+            new ResourceCache<EHealthP12[], IDataUnsealer>((a, b) => a.Length == b.Length && a.Zip(b, ReferenceEquals).All(equal => equal));
+        private readonly DataSealerFactory sealerFactory = new DataSealerFactory(NullLoggerFactory.Instance);
+        private readonly DataUnsealerFactory unsealerFactory = new DataUnsealerFactory(NullLoggerFactory.Instance);
 
         public static ServiceClient<Port> Create(EHealthP12 store, Binding binding, EndpointAddress remoteAddress, ILogger<ServiceClient<Port>> logger = null)
         {
@@ -56,6 +65,8 @@ namespace Egelke.EHealth.Client.Services
         {
             _logger = logger;
             Store = store;
+            ((ICommunicationObject)this).Closed += DisposeCryptoContexts;
+            ((ICommunicationObject)this).Faulted += DisposeCryptoContexts;
 
             if (store != null)
             {
@@ -63,6 +74,12 @@ namespace Egelke.EHealth.Client.Services
                 Sender = PartyInfo.FromCertificate(idCert);
                 ClientCredentials.ClientCertificate.Certificate = idCert;
             }
+        }
+
+        private void DisposeCryptoContexts(object sender, EventArgs args)
+        {
+            sealers.Dispose();
+            unsealers.Dispose();
         }
 
         private static Binding Enrich(Binding binding, EHealthP12 store)
@@ -150,7 +167,7 @@ namespace Egelke.EHealth.Client.Services
 
         protected byte[] ToByteArray(XmlElement el)
         {
-            return ToMemoryStream(el).ToArray();
+            using (var stream = ToMemoryStream(el)) return stream.ToArray();
         }
 
         protected byte[] EncryptForService<ClearType>(ClearType clearText, Level level = Level.B_Level) where ClearType : class
@@ -186,18 +203,25 @@ namespace Egelke.EHealth.Client.Services
                     throw new NotImplementedException("Clear text type not supported yet");
             }
 
-            if (_logger.IsEnabled(LogLevel.Debug))
+            try
             {
-                _logger.LogDebug("encrypted content: {0}", new StreamReader(clearStream).ReadToEnd());
-                clearStream.Position = 0;
+                if (_logger?.IsEnabled(LogLevel.Debug) == true)
+                {
+                    long position = clearStream.Position;
+                    using (var reader = new StreamReader(clearStream, Encoding.UTF8, true, 1024, true))
+                        _logger.LogDebug("encrypted content: {0}", reader.ReadToEnd());
+                    clearStream.Position = position;
+                }
+                using (var lease = sealers.Acquire(Tuple.Create(level, ClientCredentials.ClientCertificate.Certificate),
+                    identity => sealerFactory.Create(identity.Item1, identity.Item2)))
+                using (Stream cypherStream = await lease.Value.SealAsync(clearStream, recepients).ConfigureAwait(false))
+                {
+                    return ToByteArray(cypherStream);
+                }
             }
-
-            var senderFactory = new DataSealerFactory();
-            var sender = senderFactory.Create(level, base.ClientCredentials.ClientCertificate.Certificate);
-
-            using (Stream cypherStream = await sender.SealAsync(clearStream, recepients).ConfigureAwait(false))
+            finally
             {
-                return ToByteArray(cypherStream);
+                if (!(clearText is Stream)) clearStream.Dispose();
             }
         }
 
@@ -214,21 +238,25 @@ namespace Egelke.EHealth.Client.Services
 
         protected async Task<ClearType> DecryptAsync<ClearType>(byte[] cypherText) where ClearType : class
         {
-            var receiverFactory = new DataUnsealerFactory();
-            var receiver = receiverFactory.Create(Level.B_Level, Store, ExpiredStores.ToArray());
+            UnsealResult result;
+            var stores = new[] { Store }.Concat(ExpiredStores).ToArray();
+            using (var lease = unsealers.Acquire(stores, identity => unsealerFactory.Create(Level.B_Level, identity)))
+            using (Stream cypherStream = new MemoryStream(cypherText))
+            {
+                result = await lease.Value.UnsealAsync(cypherStream).ConfigureAwait(false);
+            }
 
-            Stream cypherStream = new MemoryStream(cypherText);
-            UnsealResult result = await receiver.UnsealAsync(cypherStream).ConfigureAwait(false);
-
+            try
+            {
             if (result.SecurityInformation.ValidationStatus != ValidationStatus.Valid)
                 throw new SecurityException("Clear text not valid");
             if (result.SecurityInformation.TrustStatus == TrustStatus.None)
                 throw new SecurityException("Clear text untrused");
 
-            if (_logger.IsEnabled(LogLevel.Debug))
+            if (_logger?.IsEnabled(LogLevel.Debug) == true)
             {
-                String msg = new StreamReader(result.UnsealedData).ReadToEnd();
-                _logger.LogDebug("decrypted content: {0}", msg);
+                using (var reader = new StreamReader(result.UnsealedData, Encoding.UTF8, true, 1024, true))
+                    _logger.LogDebug("decrypted content: {0}", reader.ReadToEnd());
                 result.UnsealedData.Position = 0;
             }
 
@@ -242,6 +270,12 @@ namespace Egelke.EHealth.Client.Services
                     using (result.UnsealedData) return ToXmlElement(result.UnsealedData) as ClearType;
                 default:
                     throw new NotImplementedException("Clear text type not supported yet");
+            }
+            }
+            catch
+            {
+                result.UnsealedData?.Dispose();
+                throw;
             }
         }
     }
