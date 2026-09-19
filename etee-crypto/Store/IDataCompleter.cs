@@ -22,6 +22,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace Egelke.EHealth.Etee.Crypto.Store
 {
@@ -53,5 +54,10 @@ namespace Egelke.EHealth.Etee.Crypto.Store
         /// <exception cref="InvalidMessageException">When the provided message isn't valid</exception>
         /// <returns>The sealed message to which the information is added</returns>
         Stream Complete(Stream sealedData);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Complete(Stream)"/>.
+        /// </summary>
+        Task<Stream> CompleteAsync(Stream sealedData);
     }
 }

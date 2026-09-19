@@ -36,6 +36,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Threading.Tasks;
 using Egelke.EHealth.Client.Pki;
 using Org.BouncyCastle.Asn1;
 using Org.BouncyCastle.X509.Extension;
@@ -80,7 +81,12 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             }
         }
 
-        public static CertificateSecurityInformation Verify(this Org.BouncyCastle.X509.X509Certificate cert, DateTime date, int[] keyUsageIndexes, int minimumKeySize, IStore<BC::X509Certificate> certs, ref IList<CertificateList> crls, ref IList<BasicOcspResponse> ocsps)
+        public static CertificateSecurityInformation Verify(this Org.BouncyCastle.X509.X509Certificate cert, DateTime date, int[] keyUsageIndexes, int minimumKeySize, IStore<BC::X509Certificate> certs, IList<CertificateList> crls, IList<BasicOcspResponse> ocsps)
+        {
+            return cert.VerifyAsync(date, keyUsageIndexes, minimumKeySize, certs, crls, ocsps).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        public static async Task<CertificateSecurityInformation> VerifyAsync(this Org.BouncyCastle.X509.X509Certificate cert, DateTime date, int[] keyUsageIndexes, int minimumKeySize, IStore<BC::X509Certificate> certs, IList<CertificateList> crls, IList<BasicOcspResponse> ocsps)
         {
             CertificateSecurityInformation result = new CertificateSecurityInformation();
             result.Certificate = new X509Certificate2(cert.GetEncoded());
@@ -155,7 +161,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             //check the chain
             Chain chain;
             if (crls != null || ocsps != null)
-                chain = dest.Certificate.BuildChain(date, extraStore, crls, ocsps);
+                chain = await dest.Certificate.BuildChainAsync(date, extraStore, crls, ocsps).ConfigureAwait(false);
             else
                 chain = dest.Certificate.BuildChain(date, extraStore);
             X509CertificateHelper.DisposeAll(extraStore);

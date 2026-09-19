@@ -41,6 +41,7 @@ using Org.BouncyCastle.Tsp;
 using System.Linq;
 using Egelke.EHealth.Etee.Crypto.Store;
 using Egelke.EHealth.Etee.Crypto.Receiver;
+using System.Threading.Tasks;
 using X509Certificate = Org.BouncyCastle.X509.X509Certificate;
 
 using Microsoft.Extensions.Logging;
@@ -80,12 +81,22 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public UnsealResult Unseal(Stream sealedData)
         {
-            return Unseal(sealedData, null, null);
+            return UnsealAsync(sealedData).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         public UnsealResult Unseal(Stream sealedData, WebKey sender)
         {
-            return Unseal(sealedData, sender, null);
+            return UnsealAsync(sealedData, sender).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        public Task<UnsealResult> UnsealAsync(Stream sealedData)
+        {
+            return UnsealAsync(sealedData, null, null);
+        }
+
+        public Task<UnsealResult> UnsealAsync(Stream sealedData, WebKey sender)
+        {
+            return UnsealAsync(sealedData, sender, null);
         }
 
 #endregion
@@ -94,22 +105,32 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public UnsealResult Unseal(Stream sealedData, SecretKey key)
         {
-            return Unseal(sealedData, null, key);
+            return UnsealAsync(sealedData, key).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         public UnsealResult Unseal(Stream sealedData, WebKey sender, SecretKey key)
+        {
+            return UnsealAsync(sealedData, sender, key).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        public Task<UnsealResult> UnsealAsync(Stream sealedData, SecretKey key)
+        {
+            return UnsealAsync(sealedData, null, key);
+        }
+
+        public async Task<UnsealResult> UnsealAsync(Stream sealedData, WebKey sender, SecretKey key)
         {
             if (sealedData == null) throw new ArgumentNullException("sealedData");
 
             try
             {
-                return Unseal(sealedData, key, sender, true);
+                return await UnsealAsync(sealedData, key, sender, true).ConfigureAwait(false);
             }
             catch (NotSupportedException)
             {
                 //Start over, in memory
                 sealedData.Position = 0;
-                return Unseal(sealedData, key, sender, false);
+                return await UnsealAsync(sealedData, key, sender, false).ConfigureAwait(false);
             }
         }
 
@@ -124,22 +145,32 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public SignatureSecurityInformation Verify(Stream sealedData, WebKey sender)
         {
-            return Verify(sealedData, sender, this.timemarkauthority);
+            return VerifyAsync(sealedData, sender, this.timemarkauthority).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
-        private SignatureSecurityInformation Verify(Stream sealedData, WebKey sender, ITimemarkProvider timemark)
+        public Task<SignatureSecurityInformation> VerifyAsync(Stream sealedData)
+        {
+            return VerifyAsync(sealedData, (WebKey)null);
+        }
+
+        public Task<SignatureSecurityInformation> VerifyAsync(Stream sealedData, WebKey sender)
+        {
+            return VerifyAsync(sealedData, sender, this.timemarkauthority);
+        }
+
+        private async Task<SignatureSecurityInformation> VerifyAsync(Stream sealedData, WebKey sender, ITimemarkProvider timemark)
         {
             logger?.LogInformation("Verifying the sealed message {0} bytes according to the level {1}", sealedData.Length, this.level);
 
             try
             {
-                return VerifyStreaming(new NullStream(), sealedData, sender, null, timemark);
+                return await VerifyStreamingAsync(new NullStream(), sealedData, sender, null, timemark).ConfigureAwait(false);
             }
             catch (NotSupportedException)
             {
                 //Start over, non optimize
                 sealedData.Position = 0;
-                return VerifyInMem(null, sealedData, sender, null, timemark);
+                return await VerifyInMemAsync(null, sealedData, sender, null, timemark).ConfigureAwait(false);
             }
         }
 
@@ -150,24 +181,28 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public SignatureSecurityInformation Verify(Stream sealedData, WebKey sender, out TimemarkKey timemarkKey)
         {
-            return Verify(sealedData, sender, this.timemarkauthority, out timemarkKey);
+            TimemarkedResult<SignatureSecurityInformation> result = VerifyWithKeyAsync(sealedData, sender, this.timemarkauthority).ConfigureAwait(false).GetAwaiter().GetResult();
+            timemarkKey = result.TimemarkKey;
+            return result.Value;
         }
 
-        private SignatureSecurityInformation Verify(Stream sealedData, WebKey sender, ITimemarkProvider timemark, out TimemarkKey timemarkKey)
+        private async Task<TimemarkedResult<SignatureSecurityInformation>> VerifyWithKeyAsync(Stream sealedData, WebKey sender, ITimemarkProvider timemark)
         {
-            SignatureSecurityInformation info = Verify(sealedData, sender, timemark);
+            SignatureSecurityInformation info = await VerifyAsync(sealedData, sender, timemark).ConfigureAwait(false);
             if (info.SigningTime == null)
             {
                 logger?.LogError("The sealed message did not contain a signing time, which is required with the timemarkKey output parameter");
                 throw new InvalidMessageException("Verification with time-marking can't be done on Java v1 messages, only on v2 messages and .Net v1 messages");
             }
 
-            timemarkKey = new TimemarkKey();
-            timemarkKey.Signer = info.Signer;
-            timemarkKey.SigningTime = info.SigningTime.Value;
-            timemarkKey.SignatureValue = info.SignatureValue;
+            var timemarkKey = new TimemarkKey
+            {
+                Signer = info.Signer,
+                SigningTime = info.SigningTime.Value,
+                SignatureValue = info.SignatureValue
+            };
 
-            return info;
+            return new TimemarkedResult<SignatureSecurityInformation>(info, timemarkKey);
         }
 
 #endregion
@@ -176,19 +211,31 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public SignatureSecurityInformation Verify(Stream sealedData, DateTime date)
         {
+            return VerifyAsync(sealedData, date).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        public Task<SignatureSecurityInformation> VerifyAsync(Stream sealedData, DateTime date)
+        {
             logger?.LogInformation("Presetting the time-mark to: {0}", date);
-            return Verify(sealedData, null, new FixedTimemarkProvider(date));
+            return VerifyAsync(sealedData, null, new FixedTimemarkProvider(date));
         }
 
         public SignatureSecurityInformation Verify(Stream sealedData, DateTime date, out TimemarkKey timemarkKey)
         {
+            TimemarkedResult<SignatureSecurityInformation> result = ((ITmaDataVerifier)this).VerifyAsync(sealedData, date).ConfigureAwait(false).GetAwaiter().GetResult();
+            timemarkKey = result.TimemarkKey;
+            return result.Value;
+        }
+
+        Task<TimemarkedResult<SignatureSecurityInformation>> ITmaDataVerifier.VerifyAsync(Stream sealedData, DateTime date)
+        {
             logger?.LogInformation("Presetting the time-mark to: {0}", date);
-            return Verify(sealedData, null, new FixedTimemarkProvider(date), out timemarkKey);
+            return VerifyWithKeyAsync(sealedData, null, new FixedTimemarkProvider(date));
         }
 
 #endregion
 
-        private UnsealResult Unseal(Stream sealedData, SecretKey key, WebKey sender, bool streaming)
+        private async Task<UnsealResult> UnsealAsync(Stream sealedData, SecretKey key, WebKey sender, bool streaming)
         {
             logger?.LogInformation("Unsealing message of {0} bytes for {1} recipient with level {2}", sealedData.Length, key == null ? "known" : "unknown", this.level);
             UnsealResult result = new UnsealResult();
@@ -198,9 +245,9 @@ namespace Egelke.EHealth.Etee.Crypto
             Stream verified = factory.CreateNew();
             using (verified)
             {
-                result.SecurityInformation.OuterSignature = streaming ?
-                    VerifyStreaming(verified, sealedData, sender, null, timemarkauthority) :
-                    VerifyInMem(verified, sealedData, sender, null, timemarkauthority);
+                result.SecurityInformation.OuterSignature = await (streaming ?
+                    VerifyStreamingAsync(verified, sealedData, sender, null, timemarkauthority) :
+                    VerifyInMemAsync(verified, sealedData, sender, null, timemarkauthority)).ConfigureAwait(false);
 
                 verified.Position = 0; //reset the stream
 
@@ -212,9 +259,9 @@ namespace Egelke.EHealth.Etee.Crypto
                     decryptedVerified.Position = 0; //reset the stream
 
                     result.UnsealedData = factory.CreateNew();
-                    result.SecurityInformation.InnerSignature = streaming ?
-                        VerifyStreaming(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority) :
-                        VerifyInMem(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority);
+                    result.SecurityInformation.InnerSignature = await (streaming ?
+                        VerifyStreamingAsync(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority) :
+                        VerifyInMemAsync(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority)).ConfigureAwait(false);
 
                     result.UnsealedData.Position = 0; //reset the stream
 
@@ -223,7 +270,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
         }
 
-        private SignatureSecurityInformation VerifyStreaming(Stream verifiedContent, Stream signed, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider timemark)
+        private async Task<SignatureSecurityInformation> VerifyStreamingAsync(Stream verifiedContent, Stream signed, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider timemark)
         {
             logger?.LogInformation("Verifying the {0} signature streamed", outer == null ? "inner" : "outer");
             try
@@ -246,7 +293,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 IStore<X509Certificate> certs = signedData.GetCertificates();
                 SignerInformationStore signerInfos = signedData.GetSignerInfos();
 
-                return Verify(signerInfos, certs, sender, outer, timemark);
+                return await VerifyAsync(signerInfos, certs, sender, outer, timemark).ConfigureAwait(false);
             }
             catch (CmsException cmse)
             {
@@ -258,7 +305,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
         }
 
-        private SignatureSecurityInformation VerifyInMem(Stream verifiedContent, Stream signed, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider timemark)
+        private async Task<SignatureSecurityInformation> VerifyInMemAsync(Stream verifiedContent, Stream signed, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider timemark)
         {
             logger?.LogInformation("Verifying the {0} signature in memory", outer == null ? "inner" : "outer");
             try
@@ -284,7 +331,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
                 IStore<X509Certificate> certs = signedData.GetCertificates();
                 SignerInformationStore signerInfos = signedData.GetSignerInfos();
-                return Verify(signerInfos, certs, sender, outer, timemark);
+                return await VerifyAsync(signerInfos, certs, sender, outer, timemark).ConfigureAwait(false);
             }
             catch (CmsException cmse)
             {
@@ -293,7 +340,7 @@ namespace Egelke.EHealth.Etee.Crypto
         }
 
         //todo test is up
-        private SignatureSecurityInformation Verify(SignerInformationStore signerInfos, IStore<X509Certificate> certs, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider timemark)
+        private async Task<SignatureSecurityInformation> VerifyAsync(SignerInformationStore signerInfos, IStore<X509Certificate> certs, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider timemark)
         {
             logger?.LogInformation("Verifying the {0} signature information", outer == null ? "outer" : "inner");
             SignatureSecurityInformation result = new SignatureSecurityInformation();
@@ -521,7 +568,10 @@ namespace Egelke.EHealth.Etee.Crypto
                        signerCert.SubjectDN, signingTime, signerInfo.GetSignature());
                     using (var signerCert2 = new X509Certificate2(signerCert.GetEncoded()))
                     {
-                        validatedTime = timemark.GetTimemark(signerCert2, signingTime, signerInfo.GetSignature()).ToUniversalTime();
+                        DateTime marked = timemark is ITimemarkProviderAsync asyncTimemark
+                            ? await asyncTimemark.GetTimemarkAsync(signerCert2, signingTime, signerInfo.GetSignature()).ConfigureAwait(false)
+                            : timemark.GetTimemark(signerCert2, signingTime, signerInfo.GetSignature());
+                        validatedTime = marked.ToUniversalTime();
                     }
                     logger?.LogDebug("The validated time is the return time-mark which is: {0}", validatedTime);
                 }
@@ -539,11 +589,11 @@ namespace Egelke.EHealth.Etee.Crypto
                     {
                         //TODO::follow the chain of A-timestamps until the root (now we assume the signature time-stamp is the root)
                         logger?.LogDebug("Validating the time-stamp against the current time for arbitration reasons");
-                        stamp = tst.Validate(crls, ocsps, DateTime.UtcNow);
+                        stamp = await tst.ValidateAsync(crls, ocsps, DateTime.UtcNow).ConfigureAwait(false);
                     }
                     else {
                         logger?.LogDebug("Validating the time-stamp against the time-stamp time since no arbitration is needed");
-                        stamp = tst.Validate(crls, ocsps);
+                        stamp = await tst.ValidateAsync(crls, ocsps).ConfigureAwait(false);
                     }
                     result.TimestampRenewalTime = stamp.RenewalTime;
                     logger?.LogDebug("The time-stamp must be renewed on {0}", result.TimestampRenewalTime);
@@ -582,8 +632,8 @@ namespace Egelke.EHealth.Etee.Crypto
             //calculate the subject status if not copied from the outer signature
             //Note that this is in the end since we need the stuff like CRL/OCSP and signing time.
             if (result.Subject == null && signerCert != null) {
-                result.Subject = signerCert.Verify(signingTime, (outer == null ? new int[] { 0 } : new int[0]),
-                    EteeActiveConfig.Unseal.MinimumSignatureKeySize, certs, ref crls, ref ocsps);
+                result.Subject = await signerCert.VerifyAsync(signingTime, (outer == null ? new int[] { 0 } : new int[0]),
+                    EteeActiveConfig.Unseal.MinimumSignatureKeySize, certs, crls, ocsps).ConfigureAwait(false);
                 result.SubjectId = signerCert.GetSubjectKeyIdentifier();
             }
             if (ski != null)
@@ -702,7 +752,7 @@ namespace Egelke.EHealth.Etee.Crypto
                         IList<CertificateList> crls = null;
                         IList<BasicOcspResponse> ocsps = null;
                         X509Certificate bcEncCert = DotNetUtilities.FromX509Certificate(encCert);
-                        result.Subject = bcEncCert.Verify(date, new int[] { 2, 3 }, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey, authCertStore, ref crls, ref ocsps);
+                        result.Subject = bcEncCert.Verify(date, new int[] { 2, 3 }, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey, authCertStore, crls, ocsps);
                         result.SubjectId = bcEncCert.GetSubjectKeyIdentifier();
                     }
                     else

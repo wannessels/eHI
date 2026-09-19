@@ -21,6 +21,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading.Tasks;
 
 namespace Egelke.EHealth.Etee.Crypto.Sender
 {
@@ -223,8 +224,33 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
         /// </example>
         Stream Seal(Stream unsealed, SecretKey key, params EncryptionToken[] tokens);
 
-        
+
 
         Stream Seal(Stream unsealed, SecretKey skey, EncryptionToken[] tokens, WebKey[] webKeys);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Seal(Stream, EncryptionToken[])"/>.
+        /// </summary>
+        Task<Stream> SealAsync(Stream unsealed, params EncryptionToken[] tokens);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Seal(Stream, X509Certificate2[])"/>.
+        /// </summary>
+        Task<Stream> SealAsync(Stream unsealed, params X509Certificate2[] certificates);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Seal(Stream, WebKey[])"/>.
+        /// </summary>
+        Task<Stream> SealAsync(Stream unsealed, params WebKey[] webKeys);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Seal(Stream, SecretKey, EncryptionToken[])"/>.
+        /// </summary>
+        Task<Stream> SealAsync(Stream unsealed, SecretKey key, params EncryptionToken[] tokens);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Seal(Stream, SecretKey, EncryptionToken[], WebKey[])"/>.
+        /// </summary>
+        Task<Stream> SealAsync(Stream unsealed, SecretKey skey, EncryptionToken[] tokens, WebKey[] webKeys);
     }
 }

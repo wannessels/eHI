@@ -38,6 +38,7 @@ using Org.BouncyCastle.Asn1.Ocsp;
 using Egelke.EHealth.Etee.Crypto.Configuration;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Utilities.Collections;
+using System.Threading.Tasks;
 
 namespace Egelke.EHealth.Etee.Crypto
 {
@@ -157,6 +158,22 @@ namespace Egelke.EHealth.Etee.Crypto
         /// <returns>Detailed information about the encryption certificate status</returns>
         public CertificateSecurityInformation Verify(bool checkRevocation)
         {
+            return VerifyAsync(checkRevocation).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Awaitable version of <see cref="Verify()"/>.
+        /// </summary>
+        public Task<CertificateSecurityInformation> VerifyAsync()
+        {
+            return VerifyAsync(true);
+        }
+
+        /// <summary>
+        /// Awaitable version of <see cref="Verify(bool)"/>.
+        /// </summary>
+        public async Task<CertificateSecurityInformation> VerifyAsync(bool checkRevocation)
+        {
             IList<CertificateList> crls;
             IList<BasicOcspResponse> ocps;
 
@@ -176,7 +193,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 crls = null;
                 ocps = null;
             }
-            CertificateSecurityInformation certInfo = encCert.Verify(DateTime.UtcNow, new int[] { 2, 3 }, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey, certs, ref crls, ref ocps);
+            CertificateSecurityInformation certInfo = await encCert.VerifyAsync(DateTime.UtcNow, new int[] { 2, 3 }, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey, certs, crls, ocps).ConfigureAwait(false);
             if (!(encCert.GetPublicKey() is RsaKeyParameters))
             {
                 certInfo.securityViolations.Add(CertSecurityViolation.NotValidKeyType);

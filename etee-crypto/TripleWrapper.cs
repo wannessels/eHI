@@ -27,6 +27,7 @@ using Egelke.EHealth.Etee.Crypto.Utils;
 using BC = Org.BouncyCastle;
 using System;
 using System.Collections.Concurrent;
+using System.Threading.Tasks;
 using System.Security.Cryptography;
 using System.Collections;
 using Org.BouncyCastle.Asn1;
@@ -115,20 +116,36 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public Stream Complete(Stream sealedData)
         {
-            TimemarkKey timemarkKey;
-            return Complete(sealedData, out timemarkKey);
+            return CompleteAsync(sealedData).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         public Stream Complete(Stream sealedData, out TimemarkKey timemarkKey)
+        {
+            TimemarkedResult<Stream> result = CompleteWithKeyAsync(sealedData).ConfigureAwait(false).GetAwaiter().GetResult();
+            timemarkKey = result.TimemarkKey;
+            return result.Value;
+        }
+
+        public async Task<Stream> CompleteAsync(Stream sealedData)
+        {
+            return (await CompleteWithKeyAsync(sealedData).ConfigureAwait(false)).Value;
+        }
+
+        Task<TimemarkedResult<Stream>> ITmaDataCompleter.CompleteAsync(Stream sealedData)
+        {
+            return CompleteWithKeyAsync(sealedData);
+        }
+
+        private async Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream sealedData)
         {
             logger?.LogInformation("Completing the provided sealed message with revocation and time info according to the level {0}", this.level);
 
             ITempStreamFactory factory = NewFactory(sealedData);
             Stream completed = factory.CreateNew();
-            Complete(this.level, completed, sealedData, null, null, out timemarkKey);
+            TimemarkKey timemarkKey = await CompleteAsync(this.level, completed, sealedData, null, null).ConfigureAwait(false);
             completed.Position = 0;
 
-            return completed;
+            return new TimemarkedResult<Stream>(completed, timemarkKey);
         }
 
         #endregion
@@ -137,29 +154,54 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public Stream Seal(Stream unsealed, params EncryptionToken[] tokens)
         {
-            return Seal(unsealed, null, tokens);
+            return SealAsync(unsealed, tokens).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         public Stream Seal(Stream unsealed, params X509Certificate2[] certs)
         {
-            ITempStreamFactory factory = NewFactory(unsealed);
-            return Seal(factory, unsealed, null, certs, null);
+            return SealAsync(unsealed, certs).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         public Stream Seal(Stream unsealed, params WebKey[] webKeys)
         {
-            return Seal(unsealed, null, null, webKeys);
+            return SealAsync(unsealed, webKeys).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         public Stream Seal(Stream unsealed, SecretKey key, params EncryptionToken[] tokens)
         {
-            return Seal(unsealed, key, tokens, null);
+            return SealAsync(unsealed, key, tokens).ConfigureAwait(false).GetAwaiter().GetResult();
         }
 
         public Stream Seal(Stream unsealed, SecretKey key, EncryptionToken[] tokens, WebKey[] webKeys)
         {
+            return SealAsync(unsealed, key, tokens, webKeys).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        public Task<Stream> SealAsync(Stream unsealed, params EncryptionToken[] tokens)
+        {
+            return SealAsync(unsealed, null, tokens, null);
+        }
+
+        public Task<Stream> SealAsync(Stream unsealed, params X509Certificate2[] certs)
+        {
             ITempStreamFactory factory = NewFactory(unsealed);
-            return Seal(factory, unsealed, key, tokens == null ? null : ConverToX509Certificates(tokens), webKeys);
+            return SealAsync(factory, unsealed, null, certs, null);
+        }
+
+        public Task<Stream> SealAsync(Stream unsealed, params WebKey[] webKeys)
+        {
+            return SealAsync(unsealed, null, null, webKeys);
+        }
+
+        public Task<Stream> SealAsync(Stream unsealed, SecretKey key, params EncryptionToken[] tokens)
+        {
+            return SealAsync(unsealed, key, tokens, null);
+        }
+
+        public Task<Stream> SealAsync(Stream unsealed, SecretKey key, EncryptionToken[] tokens, WebKey[] webKeys)
+        {
+            ITempStreamFactory factory = NewFactory(unsealed);
+            return SealAsync(factory, unsealed, key, tokens == null ? null : ConverToX509Certificates(tokens), webKeys);
         }
 
         #endregion
@@ -179,7 +221,7 @@ namespace Egelke.EHealth.Etee.Crypto
             return certs;
         }
 
-        private Stream Seal(ITempStreamFactory factory, Stream unsealedStream, SecretKey skey, X509Certificate2[] certs, WebKey[] webKeys)
+        private async Task<Stream> SealAsync(ITempStreamFactory factory, Stream unsealedStream, SecretKey skey, X509Certificate2[] certs, WebKey[] webKeys)
         {
             logger?.LogInformation("Sealing message of {0} bytes for {1}/{2} known recipients and {3} unknown recipients to level {4}",
                 unsealedStream.Length, certs?.Length, webKeys?.Length, skey == null ? 0 : 1, this.level);
@@ -191,8 +233,6 @@ namespace Egelke.EHealth.Etee.Crypto
                     outerDetached = new MemoryStream()
             )
             {
-                TimemarkKey timemarkKey;
-
                 //Inner sign
                 if (signature != null)
                     SignDetached(innerDetached, unsealedStream, signature);
@@ -206,7 +246,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 unsealedStream.Position = 0;
 
                 //embed the content in the inner signature and add any required info if it uses a different cert.
-                Complete(signature == authentication ? (Level?) null : this.level & ~Level.T_Level, innerEmbedded, innerDetached, unsealedStream, signature, out timemarkKey);
+                await CompleteAsync(signature == authentication ? (Level?) null : this.level & ~Level.T_Level, innerEmbedded, innerDetached, unsealedStream, signature).ConfigureAwait(false);
 
                 //prepare to encrypt
                 innerEmbedded.Position = 0;
@@ -252,7 +292,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
                 //embed the content in the out signature and add any required info
                 Stream result = factory.CreateNew();
-                Complete(this.level, result, outerDetached, encrypted, authentication, out timemarkKey);
+                await CompleteAsync(this.level, result, outerDetached, encrypted, authentication).ConfigureAwait(false);
 
                 //prepare to return the triple wrapped message
                 result.Position = 0;
@@ -377,7 +417,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
         }
 
-        protected void Complete(Level? level, Stream embedded, Stream signed, Stream content, X509Certificate2 providedSigner, out TimemarkKey timemarkKey)
+        protected async Task<TimemarkKey> CompleteAsync(Level? level, Stream embedded, Stream signed, Stream content, X509Certificate2 providedSigner)
         {
             logger?.LogInformation("Completing the message with of {0} bytes to level {1}", signed.Length, level);
 
@@ -385,7 +425,7 @@ namespace Egelke.EHealth.Etee.Crypto
             var gen = new CmsSignedDataStreamGenerator();
             gen.SetBufferSize(StreamBufferSize);
             var parser = new CmsSignedDataParser(signed);
-            timemarkKey = new TimemarkKey();
+            var timemarkKey = new TimemarkKey();
 
             //preset the digests so we can add the signers afterwards
             gen.AddDigests(parser.DigestOids);
@@ -442,7 +482,7 @@ namespace Egelke.EHealth.Etee.Crypto
             if (tst == null
                 && (level & Level.T_Level) == Level.T_Level && timestampProvider != null)
             {
-                tst = GetTimestamp(timemarkKey);
+                tst = await GetTimestampAsync(timemarkKey).ConfigureAwait(false);
                 AddTimestamp(unsignedAttributes, tst);
             }
 
@@ -452,12 +492,12 @@ namespace Egelke.EHealth.Etee.Crypto
                 if (embeddedCerts != null && embeddedCerts.EnumerateMatches(null).Any())
                 {
                     //extend the revocation info with info about the embedded certs
-                    revocationInfo = GetRevocationValues(timemarkKey, embeddedCerts, revocationInfo);
+                    revocationInfo = await GetRevocationValuesAsync(timemarkKey, embeddedCerts, revocationInfo).ConfigureAwait(false);
                 }
                 if (tst != null)
                 {
                     //extend the revocation info with info about the TST
-                    revocationInfo = GetRevocationValues(tst, revocationInfo);
+                    revocationInfo = await GetRevocationValuesAsync(tst, revocationInfo).ConfigureAwait(false);
                 }
                 //update the unsigned attributes
                 AddRevocationValues(unsignedAttributes, revocationInfo);
@@ -470,6 +510,7 @@ namespace Egelke.EHealth.Etee.Crypto
             gen.AddSigners(new SignerInformationStore(new SignerInformation[] { signerInfo }));
 
             contentOut.Close();
+            return timemarkKey;
         }
 
         private SignerInformation ExtractSignerInfo(CmsSignedDataParser parser)
@@ -592,7 +633,7 @@ namespace Egelke.EHealth.Etee.Crypto
             if (embeddedCerts != null) gen.AddCertificates(embeddedCerts);
         }
 
-        private TimeStampToken GetTimestamp(TimemarkKey timemarkKey)
+        private async Task<TimeStampToken> GetTimestampAsync(TimemarkKey timemarkKey)
         {
             byte[] signatureHash;
             using (SHA256 sha = SHA256.Create())
@@ -602,7 +643,10 @@ namespace Egelke.EHealth.Etee.Crypto
             if (logger?.IsEnabled(LogLevel.Debug) == true)
                 logger.LogDebug("SHA-256 hashed the signature value from {0} to {1}", Convert.ToBase64String(timemarkKey.SignatureValue), Convert.ToBase64String(signatureHash));
 
-            byte[] rawTst = timestampProvider.GetTimestampFromDocumentHash(signatureHash, "http://www.w3.org/2001/04/xmlenc#sha256");
+            const string digestMethod = "http://www.w3.org/2001/04/xmlenc#sha256";
+            byte[] rawTst = timestampProvider is ITimestampProviderAsync asyncProvider
+                ? await asyncProvider.GetTimestampFromDocumentHashAsync(signatureHash, digestMethod).ConfigureAwait(false)
+                : timestampProvider.GetTimestampFromDocumentHash(signatureHash, digestMethod);
             TimeStampToken tst = rawTst.ToTimeStampToken();
 
             //basic check
@@ -625,7 +669,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 logger.LogDebug("Added the time-stamp {0} [Token={1}]", tst.TimeStampInfo.GenTime, Convert.ToBase64String(rawTst));
         }
 
-        private RevocationValues GetRevocationValues(TimemarkKey timemarkKey, IStore<BC::X509.X509Certificate> embeddedCerts, RevocationValues revocationInfo)
+        private async Task<RevocationValues> GetRevocationValuesAsync(TimemarkKey timemarkKey, IStore<BC::X509.X509Certificate> embeddedCerts, RevocationValues revocationInfo)
         {
             IList<CertificateList> crls = new List<CertificateList>(revocationInfo.GetCrlVals());
             IList<BasicOcspResponse> ocsps = new List<BasicOcspResponse>(revocationInfo.GetOcspVals());
@@ -636,7 +680,7 @@ namespace Egelke.EHealth.Etee.Crypto
             {
                 chainExtraStore.Add(new X509Certificate2(cert.GetEncoded()));
             }
-            Chain chain = timemarkKey.Signer.BuildChain(timemarkKey.SigningTime, chainExtraStore, crls, ocsps);
+            Chain chain = await timemarkKey.Signer.BuildChainAsync(timemarkKey.SigningTime, chainExtraStore, crls, ocsps).ConfigureAwait(false);
             X509CertificateHelper.DisposeAll(chainExtraStore);
             if (chain.ChainStatus.Any(x => x.Status != X509ChainStatusFlags.NoError))
             {
@@ -648,13 +692,13 @@ namespace Egelke.EHealth.Etee.Crypto
             return new RevocationValues(crls, ocsps, null);
         }
 
-        private RevocationValues GetRevocationValues(TimeStampToken tst, RevocationValues revocationInfo)
+        private async Task<RevocationValues> GetRevocationValuesAsync(TimeStampToken tst, RevocationValues revocationInfo)
         {
             IList<CertificateList> crls = new List<CertificateList>(revocationInfo.GetCrlVals());
             IList<BasicOcspResponse> ocsps = new List<BasicOcspResponse>(revocationInfo.GetOcspVals());
             logger?.LogDebug("Start getting revocation values for TST, having {0} OCSP's and {1} CRL's", ocsps.Count, crls.Count);
 
-            Timestamp ts = tst.Validate(crls, ocsps);
+            Timestamp ts = await tst.ValidateAsync(crls, ocsps).ConfigureAwait(false);
             if (ts.TimestampStatus.Any(x => x.Status != X509ChainStatusFlags.NoError))
             {
                 logger?.LogError("The certificate chain of the time-stamp signer {0} failed with {1} issues: {2}, {3}", ts.CertificateChain.ChainElements[0].Certificate.Subject,

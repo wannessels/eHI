@@ -23,6 +23,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace Egelke.EHealth.Etee.Crypto.Store
 {
@@ -51,5 +52,15 @@ namespace Egelke.EHealth.Etee.Crypto.Store
         SignatureSecurityInformation Verify(Stream sealedData);
 
         SignatureSecurityInformation Verify(Stream sealedData, WebKey sender);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Verify(Stream)"/>.
+        /// </summary>
+        Task<SignatureSecurityInformation> VerifyAsync(Stream sealedData);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Verify(Stream, WebKey)"/>.
+        /// </summary>
+        Task<SignatureSecurityInformation> VerifyAsync(Stream sealedData, WebKey sender);
     }
 }

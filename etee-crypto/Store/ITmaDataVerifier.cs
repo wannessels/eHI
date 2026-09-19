@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace Egelke.EHealth.Etee.Crypto.Store
 {
@@ -27,5 +28,10 @@ namespace Egelke.EHealth.Etee.Crypto.Store
         /// <param name="timemarkKey">The time-mark key to be linked to the message</param>
         /// <returns>The result and additional information about the authentication part of the message</returns>
         SignatureSecurityInformation Verify(Stream sealedData, DateTime date, out TimemarkKey timemarkKey);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Verify(Stream, DateTime, out TimemarkKey)"/>.
+        /// </summary>
+        Task<TimemarkedResult<SignatureSecurityInformation>> VerifyAsync(Stream sealedData, DateTime date);
     }
 }

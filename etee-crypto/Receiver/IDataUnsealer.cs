@@ -23,6 +23,7 @@ using System.IO;
 using System.Security.Permissions;
 using Egelke.EHealth.Etee.Crypto.Status;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 
 namespace Egelke.EHealth.Etee.Crypto.Receiver
 {
@@ -170,5 +171,25 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
         /// </code>
         /// </example>
         UnsealResult Unseal(Stream sealedData);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Unseal(Stream, SecretKey)"/>.
+        /// </summary>
+        Task<UnsealResult> UnsealAsync(Stream sealedData, SecretKey key);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Unseal(Stream, WebKey)"/>.
+        /// </summary>
+        Task<UnsealResult> UnsealAsync(Stream sealedData, WebKey sender);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Unseal(Stream, WebKey, SecretKey)"/>.
+        /// </summary>
+        Task<UnsealResult> UnsealAsync(Stream sealedData, WebKey sender, SecretKey encKey);
+
+        /// <summary>
+        /// Awaitable version of <see cref="Unseal(Stream)"/>.
+        /// </summary>
+        Task<UnsealResult> UnsealAsync(Stream sealedData);
     }
 }
