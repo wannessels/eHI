@@ -470,10 +470,10 @@ namespace Egelke.EHealth.Etee.Crypto
                 }
             }
 
-            //Get the embedded CRLs and OCSPs
-            IList<CertificateList> crls = new List<CertificateList>();
-            IList<BasicOcspResponse> ocsps = new List<BasicOcspResponse>();
-            if (signerInfo != null && signerInfo.UnsignedAttributes != null)
+            //Get the embedded CRLs and OCSPs; null lists mean no revocation checks at all
+            IList<CertificateList> crls = this.level == null ? null : new List<CertificateList>();
+            IList<BasicOcspResponse> ocsps = this.level == null ? null : new List<BasicOcspResponse>();
+            if (this.level != null && signerInfo != null && signerInfo.UnsignedAttributes != null)
             {
                 logger?.LogDebug("The CMS message contains unsigned attributes");
                 Org.BouncyCastle.Asn1.Cms.Attribute revocationValuesList = signerInfo.UnsignedAttributes[PkcsObjectIdentifiers.IdAAEtsRevocationValues];
