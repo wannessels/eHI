@@ -57,7 +57,7 @@ namespace Egelke.EHealth.Etee.Crypto
         private WinX509CollectionStore encCertStore;
         private IStore<X509Certificate> authCertStore;
         private IDictionary<byte[], AsymmetricCipherKeyPair> ownKeyPairs;
-        private ITimemarkProvider timemarkauthority;
+        private readonly ITimemarkProvider timemarkauthority;
 
         internal TripleUnwrapper(
             Level? level, 
@@ -124,17 +124,22 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public SignatureSecurityInformation Verify(Stream sealedData, WebKey sender)
         {
+            return Verify(sealedData, sender, this.timemarkauthority);
+        }
+
+        private SignatureSecurityInformation Verify(Stream sealedData, WebKey sender, ITimemarkProvider timemark)
+        {
             logger?.LogInformation("Verifying the sealed message {0} bytes according to the level {1}", sealedData.Length, this.level);
 
             try
             {
-                return VerifyStreaming(new NullStream(), sealedData, sender, null);
+                return VerifyStreaming(new NullStream(), sealedData, sender, null, timemark);
             }
             catch (NotSupportedException)
             {
                 //Start over, non optimize
                 sealedData.Position = 0;
-                return VerifyInMem(null, sealedData, sender, null);
+                return VerifyInMem(null, sealedData, sender, null, timemark);
             }
         }
 
@@ -145,7 +150,12 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public SignatureSecurityInformation Verify(Stream sealedData, WebKey sender, out TimemarkKey timemarkKey)
         {
-            SignatureSecurityInformation info = Verify(sealedData, sender);
+            return Verify(sealedData, sender, this.timemarkauthority, out timemarkKey);
+        }
+
+        private SignatureSecurityInformation Verify(Stream sealedData, WebKey sender, ITimemarkProvider timemark, out TimemarkKey timemarkKey)
+        {
+            SignatureSecurityInformation info = Verify(sealedData, sender, timemark);
             if (info.SigningTime == null)
             {
                 logger?.LogError("The sealed message did not contain a signing time, which is required with the timemarkKey output parameter");
@@ -166,32 +176,14 @@ namespace Egelke.EHealth.Etee.Crypto
 
         public SignatureSecurityInformation Verify(Stream sealedData, DateTime date)
         {
-            ITimemarkProvider provider = this.timemarkauthority;
-            try
-            {
-                logger?.LogInformation("Presetting the time-mark to: {0}", date);
-                this.timemarkauthority = new FixedTimemarkProvider(date);
-                return Verify(sealedData);
-            }
-            finally
-            {
-                this.timemarkauthority = provider;
-            }
+            logger?.LogInformation("Presetting the time-mark to: {0}", date);
+            return Verify(sealedData, null, new FixedTimemarkProvider(date));
         }
 
         public SignatureSecurityInformation Verify(Stream sealedData, DateTime date, out TimemarkKey timemarkKey)
         {
-            ITimemarkProvider provider = this.timemarkauthority;
-            try
-            {
-                logger?.LogInformation("Presetting the time-mark to: {0}", date);
-                this.timemarkauthority = new FixedTimemarkProvider(date);
-                return Verify(sealedData, out timemarkKey);
-            }
-            finally
-            {
-                this.timemarkauthority = provider;
-            }
+            logger?.LogInformation("Presetting the time-mark to: {0}", date);
+            return Verify(sealedData, null, new FixedTimemarkProvider(date), out timemarkKey);
         }
 
 #endregion
@@ -207,8 +199,8 @@ namespace Egelke.EHealth.Etee.Crypto
             using (verified)
             {
                 result.SecurityInformation.OuterSignature = streaming ?
-                    VerifyStreaming(verified, sealedData, sender, null) :
-                    VerifyInMem(verified, sealedData, sender, null);
+                    VerifyStreaming(verified, sealedData, sender, null, timemarkauthority) :
+                    VerifyInMem(verified, sealedData, sender, null, timemarkauthority);
 
                 verified.Position = 0; //reset the stream
 
@@ -221,8 +213,8 @@ namespace Egelke.EHealth.Etee.Crypto
 
                     result.UnsealedData = factory.CreateNew();
                     result.SecurityInformation.InnerSignature = streaming ?
-                        VerifyStreaming(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature) :
-                        VerifyInMem(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature);
+                        VerifyStreaming(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority) :
+                        VerifyInMem(result.UnsealedData, decryptedVerified, sender, result.SecurityInformation.OuterSignature, timemarkauthority);
 
                     result.UnsealedData.Position = 0; //reset the stream
 
@@ -231,7 +223,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
         }
 
-        private SignatureSecurityInformation VerifyStreaming(Stream verifiedContent, Stream signed, WebKey sender, SignatureSecurityInformation outer)
+        private SignatureSecurityInformation VerifyStreaming(Stream verifiedContent, Stream signed, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider timemark)
         {
             logger?.LogInformation("Verifying the {0} signature streamed", outer == null ? "inner" : "outer");
             try
@@ -254,7 +246,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 IStore<X509Certificate> certs = signedData.GetCertificates();
                 SignerInformationStore signerInfos = signedData.GetSignerInfos();
 
-                return Verify(signerInfos, certs, sender, outer);
+                return Verify(signerInfos, certs, sender, outer, timemark);
             }
             catch (CmsException cmse)
             {
@@ -266,7 +258,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
         }
 
-        private SignatureSecurityInformation VerifyInMem(Stream verifiedContent, Stream signed, WebKey sender, SignatureSecurityInformation outer)
+        private SignatureSecurityInformation VerifyInMem(Stream verifiedContent, Stream signed, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider timemark)
         {
             logger?.LogInformation("Verifying the {0} signature in memory", outer == null ? "inner" : "outer");
             try
@@ -292,7 +284,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
                 IStore<X509Certificate> certs = signedData.GetCertificates();
                 SignerInformationStore signerInfos = signedData.GetSignerInfos();
-                return Verify(signerInfos, certs, sender, outer);
+                return Verify(signerInfos, certs, sender, outer, timemark);
             }
             catch (CmsException cmse)
             {
@@ -301,7 +293,7 @@ namespace Egelke.EHealth.Etee.Crypto
         }
 
         //todo test is up
-        private SignatureSecurityInformation Verify(SignerInformationStore signerInfos, IStore<X509Certificate> certs, WebKey sender, SignatureSecurityInformation outer)
+        private SignatureSecurityInformation Verify(SignerInformationStore signerInfos, IStore<X509Certificate> certs, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider timemark)
         {
             logger?.LogInformation("Verifying the {0} signature information", outer == null ? "outer" : "inner");
             SignatureSecurityInformation result = new SignatureSecurityInformation();
@@ -513,7 +505,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 if (tst == null)
                 {
                     //we are in the outer signature, so we need a time-mark (or time-stamp, but we checked that already)
-                    if (timemarkauthority == null)
+                    if (timemark == null)
                     {
                         logger?.LogError("Not time-mark authority is provided while there is not embedded time-stamp, the level includes T-Level and it isn't an inner signature");
                         throw new InvalidMessageException("The message does not contain a time-stamp and there is not time-mark authority provided while T-Level is required");
@@ -527,7 +519,7 @@ namespace Egelke.EHealth.Etee.Crypto
                        signerCert.SubjectDN, signingTime, signerInfo.GetSignature());
                     using (var signerCert2 = new X509Certificate2(signerCert.GetEncoded()))
                     {
-                        validatedTime = timemarkauthority.GetTimemark(signerCert2, signingTime, signerInfo.GetSignature()).ToUniversalTime();
+                        validatedTime = timemark.GetTimemark(signerCert2, signingTime, signerInfo.GetSignature()).ToUniversalTime();
                     }
                     logger?.LogDebug("The validated time is the return time-mark which is: {0}", validatedTime);
                 }
