@@ -606,6 +606,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 chainExtraStore.Add(new X509Certificate2(cert.GetEncoded()));
             }
             Chain chain = timemarkKey.Signer.BuildChain(timemarkKey.SigningTime, chainExtraStore, crls, ocsps);
+            X509CertificateHelper.DisposeAll(chainExtraStore);
             if (chain.ChainStatus.Count(x => x.Status != X509ChainStatusFlags.NoError) > 0)
             {
                 logger?.LogError("The certificate chain of the signer {0} failed with {1} issues: {2}, {3}", timemarkKey.Signer.Subject,

@@ -247,14 +247,19 @@ namespace Egelke.EHealth.Client.Pki
             X509Certificate2 signer = tst.CheckSigner(value, extraCerts);
 
             //check and extract the cert
-            var extraStore = tst.GetExtraStore();
+            var embedded = tst.GetExtraStore();
+            var extraStore = new X509Certificate2Collection(embedded);
             if (extraCerts != null) extraStore.AddRange(extraCerts);
 
             //get the validation time
             DateTime validationTime = value.GetValidationTime(trustedTime);
 
             //build the chain
-            value.CertificateChain = signer.BuildChain(validationTime, extraStore, crls, ocsps); //we assume time-stamp signers aren't suspended, only permanently revoked
+            using (signer)
+            {
+                value.CertificateChain = signer.BuildChain(validationTime, extraStore, crls, ocsps); //we assume time-stamp signers aren't suspended, only permanently revoked
+            }
+            X509CertificateHelper.DisposeAll(embedded);
 
             //get the renewal time
             value.RenewalTime = value.CertificateChain.GetMinNotAfter();
@@ -279,14 +284,19 @@ namespace Egelke.EHealth.Client.Pki
             X509Certificate2 signer = tst.CheckSigner(value, extraCerts);
 
             //check and extract the cert
-            var extraStore = tst.GetExtraStore();
+            var embedded = tst.GetExtraStore();
+            var extraStore = new X509Certificate2Collection(embedded);
             if (extraCerts != null) extraStore.AddRange(extraCerts);
 
             //get the validation time
             DateTime validationTime = value.GetValidationTime(trustedTime);
 
             //build the chain
-            value.CertificateChain = await signer.BuildChainAsync(validationTime, extraStore, crls, ocsps); //we assume time-stamp signers aren't suspended, only permanently revoked
+            using (signer)
+            {
+                value.CertificateChain = await signer.BuildChainAsync(validationTime, extraStore, crls, ocsps).ConfigureAwait(false); //we assume time-stamp signers aren't suspended, only permanently revoked
+            }
+            X509CertificateHelper.DisposeAll(embedded);
 
             //get the renewal time
             value.RenewalTime = value.CertificateChain.GetMinNotAfter();

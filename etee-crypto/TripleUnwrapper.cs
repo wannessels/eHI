@@ -525,7 +525,10 @@ namespace Egelke.EHealth.Etee.Crypto
                     }
                     logger?.LogDebug("Requesting time-mark for message signed by {0}, signed on {1} and with signature value {2}",
                        signerCert.SubjectDN, signingTime, signerInfo.GetSignature());
-                    validatedTime = timemarkauthority.GetTimemark(new X509Certificate2(signerCert.GetEncoded()), signingTime, signerInfo.GetSignature()).ToUniversalTime();
+                    using (var signerCert2 = new X509Certificate2(signerCert.GetEncoded()))
+                    {
+                        validatedTime = timemarkauthority.GetTimemark(signerCert2, signingTime, signerInfo.GetSignature()).ToUniversalTime();
+                    }
                     logger?.LogDebug("The validated time is the return time-mark which is: {0}", validatedTime);
                 }
                 else

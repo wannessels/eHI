@@ -138,6 +138,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 chain = dest.Certificate.BuildChain(date, extraStore, crls, ocsps);
             else
                 chain = dest.Certificate.BuildChain(date, extraStore);
+            X509CertificateHelper.DisposeAll(extraStore);
 
             //process the chain
             foreach (ChainElement ce in chain.ChainElements)
@@ -145,7 +146,8 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 //connect the prepared link
                 if (previous != null) previous.IssuerInfo = dest;
 
-                //update the link
+                //update the link, the chain hands out its own copy of the certificate
+                dest.Certificate?.Dispose();
                 dest.Certificate = ce.Certificate;
                 foreach (X509ChainStatus status in ce.ChainElementStatus.Where(x => x.Status != X509ChainStatusFlags.NoError))
                 {

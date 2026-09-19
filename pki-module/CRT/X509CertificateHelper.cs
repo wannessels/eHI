@@ -95,26 +95,38 @@ namespace Egelke.EHealth.Client.Pki
                 throw new ArgumentException("validation can't occur in the future", "validationTime");
             }
 
-            X509Chain x509Chain = new X509Chain();
-            if (extraStore != null) x509Chain.ChainPolicy.ExtraStore.AddRange(extraStore);
-            x509Chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-            x509Chain.ChainPolicy.VerificationTime = validationTime;
-            x509Chain.Build(cert);
-
-            Chain chain = new Chain();
-            foreach (var status in x509Chain.ChainStatus)
+            using (X509Chain x509Chain = new X509Chain())
             {
-                trace.TraceEvent(status.Status != X509ChainStatusFlags.NoError ? TraceEventType.Warning : TraceEventType.Information, 0,
-                    "The certificate chain for {0} has a status {1}: {2}", cert.Subject, status.Status, status.StatusInformation);
-                chain.ChainStatus.Add(status);
-            }
+                if (extraStore != null) x509Chain.ChainPolicy.ExtraStore.AddRange(extraStore);
+                x509Chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                x509Chain.ChainPolicy.VerificationTime = validationTime;
+                x509Chain.Build(cert);
 
-            foreach (X509ChainElement x509Element in x509Chain.ChainElements)
-            {
-                chain.ChainElements.Add(new ChainElement(x509Element));
-            }
+                Chain chain = new Chain();
+                foreach (var status in x509Chain.ChainStatus)
+                {
+                    trace.TraceEvent(status.Status != X509ChainStatusFlags.NoError ? TraceEventType.Warning : TraceEventType.Information, 0,
+                        "The certificate chain for {0} has a status {1}: {2}", cert.Subject, status.Status, status.StatusInformation);
+                    chain.ChainStatus.Add(status);
+                }
 
-            return chain;
+                foreach (X509ChainElement x509Element in x509Chain.ChainElements)
+                {
+                    chain.ChainElements.Add(new ChainElement(x509Element));
+                }
+
+                return chain;
+            }
+        }
+
+        /// <summary>
+        /// Dispose every certificate in the collection and empty it.
+        /// </summary>
+        /// <param name="certs">Collection of certificates that are owned by the caller</param>
+        public static void DisposeAll(X509Certificate2Collection certs)
+        {
+            foreach (X509Certificate2 cert in certs) cert.Dispose();
+            certs.Clear();
         }
 
         /// <summary>
