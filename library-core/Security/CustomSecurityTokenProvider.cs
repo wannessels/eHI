@@ -17,6 +17,7 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IdentityModel.Policy;
@@ -31,8 +32,6 @@ using Egelke.EHealth.Client.Helper;
 using Egelke.EHealth.Client.Sts.WsTrust200512;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
-using static System.Collections.Specialized.BitVector32;
-using static System.Net.WebRequestMethods;
 
 namespace Egelke.EHealth.Client.Security
 {
@@ -50,6 +49,8 @@ namespace Egelke.EHealth.Client.Security
         private readonly CustomIssuedSecurityTokenParameters _tokenParams;
 
         private readonly X509Certificate2 _idCert;
+
+        private static readonly ConcurrentDictionary<string, object> _tokenLocks = new ConcurrentDictionary<string, object>();
 
         /// <summary>
         /// Default constructor.
@@ -150,9 +151,14 @@ namespace Egelke.EHealth.Client.Security
         {
             var tokenId = _tokenParams.ToId(_idCert);
             var token = _tokenParams.Cache.Get<SecurityToken>(tokenId);
+            if (IsUsable(token)) return token;
 
-            if (token == null || token.ValidTo < DateTime.UtcNow.AddMinutes(+5.0))
+            // single flight: concurrent callers for the same identity wait for one STS round trip
+            lock (_tokenLocks.GetOrAdd(tokenId, _ => new object()))
             {
+                token = _tokenParams.Cache.Get<SecurityToken>(tokenId);
+                if (IsUsable(token)) return token;
+
                 if (token == null)
                     token = CreateSamlHokToken(timeout);
                 else
@@ -162,8 +168,13 @@ namespace Egelke.EHealth.Client.Security
                     Size = 1,
                     AbsoluteExpiration = token.ValidTo.AddHours(1.0), //keep it for a little while longer so we can renew it if needed.
                 });
+                return token;
             }
-            return token;
+        }
+
+        private static bool IsUsable(SecurityToken token)
+        {
+            return token != null && token.ValidTo >= DateTime.UtcNow.AddMinutes(5.0);
         }
 
         /// <summary>
