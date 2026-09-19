@@ -19,6 +19,7 @@
 using Egelke.EHealth.Client.Security;
 using System;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Cryptography.Xml;
 using System.ServiceModel.Security;
@@ -186,28 +187,43 @@ namespace Egelke.EHealth.Client.Helper
             sec.AppendChild(tokenXml);
 
             var signedDoc = new CustomSignedXml(doc);
-            if (proofToken.Certificate.GetRSAPrivateKey() != null)
+            AsymmetricAlgorithm signingKey = proofToken.Certificate.GetRSAPrivateKey();
+            if (signingKey != null)
             {
-                signedDoc.SigningKey = proofToken.Certificate.GetRSAPrivateKey();
                 signedDoc.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
-            }
-            else if (proofToken.Certificate.GetECDsaPrivateKey() != null)
-            {
-                ECDSAConfig.Init();  //ensure that we can sign with ECDSA
-                signedDoc.SigningKey = proofToken.Certificate.GetECDsaPrivateKey();
-                signedDoc.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256";
             }
             else
             {
-                throw new ArgumentException("Certificate key unsupported", nameof(proofToken.Certificate));
+                signingKey = proofToken.Certificate.GetECDsaPrivateKey();
+                if (signingKey == null) throw new ArgumentException("Certificate key unsupported", nameof(proofToken.Certificate));
+                ECDSAConfig.Init();  //ensure that we can sign with ECDSA
+                signedDoc.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256";
             }
-            signedDoc.SignedInfo.CanonicalizationMethod = SignedXml.XmlDsigExcC14NTransformUrl;
+            using (signingKey)
+            {
+                signedDoc.SigningKey = signingKey;
+                signedDoc.SignedInfo.CanonicalizationMethod = SignedXml.XmlDsigExcC14NTransformUrl;
+                AddReferences(signedDoc, signParts, tsId.Value, bodyId, token.Id);
+
+                var keyIdClause = token.CreateKeyIdentifierClause<GenericXmlSecurityKeyIdentifierClause>();
+                signedDoc.KeyInfo.AddClause(new CustomKeyInfoClause(keyIdClause));
+
+                signedDoc.ComputeSignature();
+            }
+            XmlNode signature = signedDoc.GetXml();
+            signature = doc.ImportNode(signature, true);
+
+            sec.AppendChild(signature);
+        }
+
+        private static void AddReferences(SignedXml signedDoc, SignParts signParts, string tsId, string bodyId, string tokenId)
+        {
 
             if ((signParts & SignParts.Timestamp) == SignParts.Timestamp)
             {
                 var reference = new Reference
                 {
-                    Uri = "#" + tsId.Value,
+                    Uri = "#" + tsId,
                     DigestMethod = "http://www.w3.org/2001/04/xmlenc#sha256"
                 };
                 var transform = new XmlDsigExcC14NTransform();
@@ -231,7 +247,7 @@ namespace Egelke.EHealth.Client.Helper
             {
                 var reference = new Reference
                 {
-                    Uri = "#" + token.Id,
+                    Uri = "#" + tokenId,
                     DigestMethod = "http://www.w3.org/2001/04/xmlenc#sha256"
                 };
                 var transform = new XmlDsigExcC14NTransform();
@@ -239,15 +255,6 @@ namespace Egelke.EHealth.Client.Helper
 
                 signedDoc.SignedInfo.AddReference(reference);
             }
-
-            var keyIdClause = token.CreateKeyIdentifierClause<GenericXmlSecurityKeyIdentifierClause>();
-            signedDoc.KeyInfo.AddClause(new CustomKeyInfoClause(keyIdClause));
-
-            signedDoc.ComputeSignature();
-            XmlNode signature = signedDoc.GetXml();
-            signature = doc.ImportNode(signature, true);
-
-            sec.AppendChild(signature);
         }
 
         
