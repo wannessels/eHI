@@ -173,12 +173,24 @@ namespace Egelke.EHealth.Client.Security
         /// <returns>The generic xml version of the token</returns>
         protected SecurityToken CreateSamlHokToken(TimeSpan timeout)
         {
+            var client = CreateStsClient();
+            try
+            {
+                XmlElement assertion = client.RequestTicket(_tokenParams.SessionCertificate, _tokenParams.SessionDuration, _tokenParams.AuthClaims); //todo::use timeout
+                return ParseAssertion(assertion);
+            }
+            finally
+            {
+                WsTrustClient.CloseOrAbort(client);
+            }
+        }
+
+        private WsTrustClient CreateStsClient()
+        {
             var client = new WsTrustClient(_tokenParams.IssuerBinding ?? new EhBinding(_logger), _tokenParams.IssuerAddress, _logger);
             client.ClientCredentials.ClientCertificate.Certificate = _idCert;
             if (_logger != null) client.Endpoint.EndpointBehaviors.Add(new LoggingEndpointBehavior(_logger));
-
-            XmlElement assertion = client.RequestTicket(_tokenParams.SessionCertificate, _tokenParams.SessionDuration, _tokenParams.AuthClaims); //todo::use timeout
-            return ParseAssertion(assertion);
+            return client;
         }
 
         /// <summary>
@@ -190,13 +202,17 @@ namespace Egelke.EHealth.Client.Security
         /// <exception cref="ArgumentException">previous token isn't a generic xml token</exception>
         protected SecurityToken RenewSamlHokToken(SecurityToken previous, TimeSpan timeout)
         {
-            var client = new WsTrustClient(_tokenParams.IssuerBinding ?? new EhBinding(_logger), _tokenParams.IssuerAddress, _logger);
-            client.ClientCredentials.ClientCertificate.Certificate = _idCert;
-            if (_logger != null) client.Endpoint.EndpointBehaviors.Add(new LoggingEndpointBehavior(_logger));
-
             var xmlToken = previous as GenericXmlSecurityToken ?? throw new ArgumentException("previous token not a GenericXmlSecurityToken", nameof(previous));
-            XmlElement assertion = client.RenewTicket(_tokenParams.SessionCertificate, xmlToken.TokenXml); //todo::use timeout
-            return ParseAssertion(assertion);
+            var client = CreateStsClient();
+            try
+            {
+                XmlElement assertion = client.RenewTicket(_tokenParams.SessionCertificate, xmlToken.TokenXml); //todo::use timeout
+                return ParseAssertion(assertion);
+            }
+            finally
+            {
+                WsTrustClient.CloseOrAbort(client);
+            }
         }
 
         private GenericXmlSecurityToken ParseAssertion(XmlElement assertion)

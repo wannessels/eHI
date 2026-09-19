@@ -70,6 +70,12 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
     {
         private static readonly Regex ClaimTypeExp = new Regex("({(?<ns>.+)})?(?<name>.+)", RegexOptions.Compiled);
 
+        // The XmlRootAttribute overload is not cached by the runtime and would emit a new assembly per call.
+        private static readonly XmlSerializer ChallengeSerializer = new XmlSerializer(typeof(RequestSecurityTokenResponseType), new XmlRootAttribute("RequestSecurityTokenResponse")
+        {
+            Namespace = "http://docs.oasis-open.org/ws-sx/ws-trust/200512"
+        });
+
         private readonly ILogger _logger;
 
         /// <summary>
@@ -229,12 +235,8 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
             }
             else
             {
-                var serializer = new XmlSerializer(typeof(RequestSecurityTokenResponseType), new XmlRootAttribute("RequestSecurityTokenResponse")
-                {
-                    Namespace = "http://docs.oasis-open.org/ws-sx/ws-trust/200512"
-                });
                 var reader = new XmlNodeReader(responseBody);
-                var responseObject = (RequestSecurityTokenResponseType)serializer.Deserialize(reader);
+                var responseObject = (RequestSecurityTokenResponseType)ChallengeSerializer.Deserialize(reader);
                 return ProcessChallenge(sessionCert, responseObject);
             }
         }
@@ -249,21 +251,43 @@ namespace Egelke.EHealth.Client.Sts.WsTrust200512
 
             //create a secondary channel with new credentails to send the challenge
             ChannelFactory<IWsTrustPortFixed> channelFactory = new ChannelFactory<IWsTrustPortFixed>(base.Endpoint.Binding, base.Endpoint.Address);
-            channelFactory.Credentials.ClientCertificate.Certificate = sessionCert;
-            IWsTrustPortFixed secondary = channelFactory.CreateChannel();
-
-            //send the (signed) Challenge, get the reponse as message to not break the internal signature
-            Message responseMsg = secondary.Challenge(new RequestSecurityTokenResponse() {RequestSecurityTokenResponse1 = response });
-            ValidateMessage(responseMsg);
-
-            var responseBody = new XmlDocument
+            try
             {
-                PreserveWhitespace = true
-            };
-            responseBody.Load(responseMsg.GetReaderAtBodyContents());
+                channelFactory.Credentials.ClientCertificate.Certificate = sessionCert;
+                IWsTrustPortFixed secondary = channelFactory.CreateChannel();
 
-            //TODO::check if correcty wrapped, but for now we do not care.
-            return (XmlElement)responseBody.GetElementsByTagName("Assertion", "urn:oasis:names:tc:SAML:1.0:assertion")[0];
+                //send the (signed) Challenge, get the reponse as message to not break the internal signature
+                Message responseMsg = secondary.Challenge(new RequestSecurityTokenResponse() { RequestSecurityTokenResponse1 = response });
+                ValidateMessage(responseMsg);
+
+                var responseBody = new XmlDocument
+                {
+                    PreserveWhitespace = true
+                };
+                responseBody.Load(responseMsg.GetReaderAtBodyContents());
+
+                //TODO::check if correcty wrapped, but for now we do not care.
+                return (XmlElement)responseBody.GetElementsByTagName("Assertion", "urn:oasis:names:tc:SAML:1.0:assertion")[0];
+            }
+            finally
+            {
+                CloseOrAbort(channelFactory);
+            }
+        }
+
+        internal static void CloseOrAbort(ICommunicationObject communicationObject)
+        {
+            try
+            {
+                if (communicationObject.State == CommunicationState.Faulted)
+                    communicationObject.Abort();
+                else
+                    communicationObject.Close();
+            }
+            catch
+            {
+                communicationObject.Abort();
+            }
         }
 
         private static void ValidateMessage(Message message)
