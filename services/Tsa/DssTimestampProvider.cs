@@ -21,6 +21,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using System.Security.Cryptography.X509Certificates;
 using Egelke.EHealth.Client.Pki;
 
@@ -34,7 +35,7 @@ namespace Egelke.EHealth.Client.Services.Tsa
     /// Send a DSS-Sign request compliant with the timestamp profile to the TSA.
     /// </para>
     /// </remarks>
-    public class DssTimestampProvider : ITimestampProvider
+    public class DssTimestampProvider : ITimestampProviderAsync
     {
         private TimeStampAuthorityClient client;
 
@@ -99,6 +100,19 @@ namespace Egelke.EHealth.Client.Services.Tsa
         /// <returns>The RFC3161 Timestamp token</returns>
         public virtual byte[] GetTimestampFromDocumentHash(byte[] hash, string digestMethod)
         {
+            return ParseResponse(client.Stamp(CreateRequest(hash, digestMethod)));
+        }
+
+        /// <summary>
+        /// Awaitable version of <see cref="GetTimestampFromDocumentHash(byte[], string)"/>.
+        /// </summary>
+        public virtual async Task<byte[]> GetTimestampFromDocumentHashAsync(byte[] hash, string digestMethod)
+        {
+            return ParseResponse(await client.StampAsync(CreateRequest(hash, digestMethod)).ConfigureAwait(false));
+        }
+
+        private SignRequest CreateRequest(byte[] hash, string digestMethod)
+        {
             //create request
             SignRequest request = new SignRequest();
 
@@ -113,10 +127,11 @@ namespace Egelke.EHealth.Client.Services.Tsa
             docHash.DigestValue = hash;
             request.InputDocuments = new InputDocuments();
             request.InputDocuments.Items = new object[] { docHash };
+            return request;
+        }
 
-            //Send the request
-            SignResponse resp = client.Stamp(request);
-
+        private static byte[] ParseResponse(SignResponse resp)
+        {
             if (resp.Result.ResultMajor != "urn:oasis:names:tc:dss:1.0:resultmajor:Success")
             {
                 throw new ApplicationException(resp.Result.ResultMessage.Value);

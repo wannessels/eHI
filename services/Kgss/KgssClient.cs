@@ -44,20 +44,37 @@ namespace Egelke.EHealth.Client.Services.Kgss
 
         public SecretKey GetNewKey(params CredentialType[] allowed)
         {
-            var reqContent = CreateGetNewKeyRequestContent(allowed);
-            var req = new GetNewKeyRequest1()
+            var req = BuildGetNewKeyRequest(EncryptForService(CreateGetNewKeyRequestContent(allowed)), allowed);
+            var rsp = Channel.GetNewKey(req)?.GetNewKeyResponse;
+            CheckGetNewKeyResponse(rsp);
+            return ParseGetNewKeyResponseContent(Decrypt<XmlElement>(rsp.SealedNewKeyResponse.SealedContent));
+        }
+
+        public async Task<SecretKey> GetNewKeyAsync(params CredentialType[] allowed)
+        {
+            var req = BuildGetNewKeyRequest(await EncryptForServiceAsync(CreateGetNewKeyRequestContent(allowed)).ConfigureAwait(false), allowed);
+            var rsp = (await Channel.GetNewKeyAsync(req).ConfigureAwait(false))?.GetNewKeyResponse;
+            CheckGetNewKeyResponse(rsp);
+            return ParseGetNewKeyResponseContent(await DecryptAsync<XmlElement>(rsp.SealedNewKeyResponse.SealedContent).ConfigureAwait(false));
+        }
+
+        private GetNewKeyRequest1 BuildGetNewKeyRequest(byte[] sealedContent, CredentialType[] allowed)
+        {
+            _logger.LogInformation("Requesting New Key from KGSS, for {0} allowed", allowed?.Length);
+            return new GetNewKeyRequest1()
             {
                 GetNewKeyRequest = new GetNewKeyRequest()
                 {
                     SealedNewKeyRequest = new SealedContentType()
                     {
-                        SealedContent = EncryptForService(reqContent)
+                        SealedContent = sealedContent
                     }
                 }
             };
+        }
 
-            _logger.LogInformation("Requesting New Key from KGSS, for {0} allowed", allowed?.Length);
-            var rsp = Channel.GetNewKey(req)?.GetNewKeyResponse;
+        private void CheckGetNewKeyResponse(GetNewKeyResponse rsp)
+        {
             if (rsp?.Status?.Code != "200")
             {
                 _logger.LogWarning("Failed to retrieve New Key from KGSS {0}: {1}", rsp?.Status?.Code, rsp?.Status?.Message);
@@ -67,40 +84,43 @@ namespace Egelke.EHealth.Client.Services.Kgss
                 }
                 throw new ServiceException(rsp?.Status?.Code, rsp?.Status?.Message);
             }
-            if (rsp?.Error != null)
-            {
-                foreach (var error in rsp?.Error)
-                {
-                    _logger?.LogWarning("Failed to obtain ETK, Message Error returned {0}: {1}", error.Code, error.Message);
-                }
-                if (rsp?.Error?.Length > 0)
-                {
-                    var error = rsp.Error[0];
-                    throw new ServiceException(error.Code, error?.Message?.Length > 0 ? error.Message[0]?.Value : null);
-                }
-            }
-
+            CheckErrors(rsp?.Error);
             _logger.LogInformation("Received New Key from KGSS with response id {0}", rsp?.Id);
-            var rspContent = Decrypt<XmlElement>(rsp.SealedNewKeyResponse.SealedContent);
-            return ParseGetNewKeyResponseContent(rspContent);
         }
 
         public SecretKey GetKey(byte[] id)
         {
-            var reqContent = CreateGetKeyRequestContent(id);
-            var req = new GetKeyRequest1()
+            var req = BuildGetKeyRequest(EncryptForService(CreateGetKeyRequestContent(id)), id);
+            var rsp = Channel.GetKey(req)?.GetKeyResponse;
+            CheckGetKeyResponse(rsp);
+            return new SecretKey(id, ParseGetKeyResponseContent(Decrypt<XmlElement>(rsp.SealedKeyResponse.SealedContent)));
+        }
+
+        public async Task<SecretKey> GetKeyAsync(byte[] id)
+        {
+            var req = BuildGetKeyRequest(await EncryptForServiceAsync(CreateGetKeyRequestContent(id)).ConfigureAwait(false), id);
+            var rsp = (await Channel.GetKeyAsync(req).ConfigureAwait(false))?.GetKeyResponse;
+            CheckGetKeyResponse(rsp);
+            return new SecretKey(id, ParseGetKeyResponseContent(await DecryptAsync<XmlElement>(rsp.SealedKeyResponse.SealedContent).ConfigureAwait(false)));
+        }
+
+        private GetKeyRequest1 BuildGetKeyRequest(byte[] sealedContent, byte[] id)
+        {
+            _logger.LogInformation("Requesting Key from KGSS, with id {0}", Convert.ToBase64String(id));
+            return new GetKeyRequest1()
             {
                 GetKeyRequest = new GetKeyRequest()
                 {
                     SealedKeyRequest = new SealedContentType()
                     {
-                        SealedContent = EncryptForService(reqContent)
+                        SealedContent = sealedContent
                     }
                 }
             };
+        }
 
-            _logger.LogInformation("Requesting Key from KGSS, with id {0}", Convert.ToBase64String(id));
-            var rsp = Channel.GetKey(req)?.GetKeyResponse;
+        private void CheckGetKeyResponse(GetKeyResponse rsp)
+        {
             if (rsp?.Status?.Code != "200")
             {
                 _logger.LogWarning("Failed to retrieve Key from KGSS {0}: {1}", rsp?.Status?.Code, rsp?.Status?.Message);
@@ -110,24 +130,22 @@ namespace Egelke.EHealth.Client.Services.Kgss
                 }
                 throw new ServiceException(rsp?.Status?.Code, rsp?.Status?.Message);
             }
-            if (rsp?.Error != null)
+            CheckErrors(rsp?.Error);
+            _logger.LogInformation("Received Key from KGSS with response id {0}", rsp?.Id);
+        }
+
+        private void CheckErrors(ErrorType2[] errors)
+        {
+            if (errors == null) return;
+            foreach (var error in errors)
             {
-                foreach (var error in rsp?.Error)
-                {
-                    _logger?.LogWarning("Failed to obtain ETK, Message Error returned {0}: {1}", error.Code, error.Message);
-                }
-                if (rsp?.Error?.Length > 0)
-                {
-                    var error = rsp.Error[0];
-                    throw new ServiceException(error.Code, error?.Message?.Length > 0 ? error.Message[0]?.Value : null);
-                }
+                _logger?.LogWarning("Failed to obtain ETK, Message Error returned {0}: {1}", error.Code, error.Message);
             }
-
-            _logger.LogInformation("Received New Key from KGSS with response id {0}", rsp?.Id);
-            var rspContent = Decrypt<XmlElement>(rsp.SealedKeyResponse.SealedContent);
-            var key = ParseGetKeyResponseContent(rspContent);
-
-            return new SecretKey(id, key);
+            if (errors.Length > 0)
+            {
+                var error = errors[0];
+                throw new ServiceException(error.Code, error?.Message?.Length > 0 ? error.Message[0]?.Value : null);
+            }
         }
 
         protected XmlElement CreateGetNewKeyRequestContent(CredentialType[] allowed)

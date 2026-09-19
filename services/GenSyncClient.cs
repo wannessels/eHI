@@ -37,32 +37,56 @@ namespace Egelke.EHealth.Client.Services
         }
             
 
+        private sealed class DecryptedContent
+        {
+            public DecryptedContent(byte[] body, string contentType)
+            {
+                Body = body;
+                ContentType = contentType;
+            }
+
+            public byte[] Body { get; }
+            public string ContentType { get; }
+        }
+
         protected SendRequest CreateRequest<SendRequest>(String inputRef, XmlElement value, EncryptionType? etee = null) where SendRequest : SendRequestType, new()
         {
             return CreateRequest<SendRequest>(inputRef, "text/xml", ToByteArray(value), etee);
         }
 
+        protected Task<SendRequest> CreateRequestAsync<SendRequest>(String inputRef, XmlElement value, EncryptionType? etee = null) where SendRequest : SendRequestType, new()
+        {
+            return CreateRequestAsync<SendRequest>(inputRef, "text/xml", ToByteArray(value), etee);
+        }
+
         protected SendRequest CreateRequest<SendRequest>(String inputRef, String contentType, byte[] value, EncryptionType? etee = null) where SendRequest : SendRequestType, new()
         {
-            byte[] blobValue;
-            string blobContentType;
-            string contentEncryption;
-            switch(etee)
+            switch (etee)
             {
                 case null:
-                    blobValue = value;
-                    blobContentType = contentType;
-                    contentEncryption = null;
-                    break;
+                    return BuildRequest<SendRequest>(inputRef, value, contentType, null);
                 case EncryptionType.EncryptedForKnownBED:
-                    blobValue = EncryptForBed(inputRef, value, contentType);
-                    blobContentType = "text/plain";
-                    contentEncryption = "encryptedForKnownBED";
-                    break;
+                    return BuildRequest<SendRequest>(inputRef, EncryptForBed(inputRef, value, contentType), "text/plain", "encryptedForKnownBED");
                 default:
                     throw new NotImplementedException("Encryption type not supported yet");
             }
+        }
 
+        protected async Task<SendRequest> CreateRequestAsync<SendRequest>(String inputRef, String contentType, byte[] value, EncryptionType? etee = null) where SendRequest : SendRequestType, new()
+        {
+            switch (etee)
+            {
+                case null:
+                    return BuildRequest<SendRequest>(inputRef, value, contentType, null);
+                case EncryptionType.EncryptedForKnownBED:
+                    return BuildRequest<SendRequest>(inputRef, await EncryptForBedAsync(inputRef, value, contentType).ConfigureAwait(false), "text/plain", "encryptedForKnownBED");
+                default:
+                    throw new NotImplementedException("Encryption type not supported yet");
+            }
+        }
+
+        private SendRequest BuildRequest<SendRequest>(String inputRef, byte[] blobValue, string blobContentType, string contentEncryption) where SendRequest : SendRequestType, new()
+        {
             var req = new SendRequest()
             {
                 Id = "_" + Guid.NewGuid().ToString(),
@@ -97,46 +121,96 @@ namespace Egelke.EHealth.Client.Services
 
         protected Response HandleReturn<Response>(ResponseReturnType rsp) where Response : class
         {
-            _logger?.LogInformation("Received response for {0} with out-ref {1} and nip-ref {2}",
-                rsp.CommonOutput.InputReference,
-                rsp?.CommonOutput?.OutputReference,
-                rsp?.CommonOutput?.NIPReference);
+            LogReturn(rsp);
 
-            byte[] rspBody;
-            string contentType;
+            DecryptedContent content;
             switch (rsp?.Detail?.ContentEncryption)
             {
                 case null:
-                    rspBody = rsp?.Detail?.Value;
-                    contentType = rsp?.Detail?.ContentType;
+                    content = new DecryptedContent(rsp?.Detail?.Value, rsp?.Detail?.ContentType);
                     break;
                 case "encryptedForKnownRecipient":
-                    //check content type, should be text/plain (a somewhat dubious choice)
-                    if (rsp?.Detail?.ContentType != "text/plain") throw new InvalidOperationException("content type not supported for encrypted content: " + rsp?.Detail?.ContentType);
-                    rspBody = DecryptForKnown(rsp?.Detail?.Value, out contentType);
+                    CheckEncryptedContentType(rsp);
+                    content = DecryptForKnown(rsp.Detail.Value);
                     break;
                 default:
                     throw new NotImplementedException("encryption is not yet supported");
             }
 
+            return ToResponse<Response>(rsp, content);
+        }
+
+        protected async Task<Response> HandleReturnAsync<Response>(ResponseReturnType rsp) where Response : class
+        {
+            LogReturn(rsp);
+
+            DecryptedContent content;
+            switch (rsp?.Detail?.ContentEncryption)
+            {
+                case null:
+                    content = new DecryptedContent(rsp?.Detail?.Value, rsp?.Detail?.ContentType);
+                    break;
+                case "encryptedForKnownRecipient":
+                    CheckEncryptedContentType(rsp);
+                    content = await DecryptForKnownAsync(rsp.Detail.Value).ConfigureAwait(false);
+                    break;
+                default:
+                    throw new NotImplementedException("encryption is not yet supported");
+            }
+
+            return ToResponse<Response>(rsp, content);
+        }
+
+        private void LogReturn(ResponseReturnType rsp)
+        {
+            _logger?.LogInformation("Received response for {0} with out-ref {1} and nip-ref {2}",
+                rsp.CommonOutput.InputReference,
+                rsp?.CommonOutput?.OutputReference,
+                rsp?.CommonOutput?.NIPReference);
+        }
+
+        private static void CheckEncryptedContentType(ResponseReturnType rsp)
+        {
+            //check content type, should be text/plain (a somewhat dubious choice)
+            if (rsp?.Detail?.ContentType != "text/plain") throw new InvalidOperationException("content type not supported for encrypted content: " + rsp?.Detail?.ContentType);
+        }
+
+        private Response ToResponse<Response>(ResponseReturnType rsp, DecryptedContent content) where Response : class
+        {
             if (_logger?.IsEnabled(LogLevel.Debug) == true)
             {
                 _logger.LogDebug("Received response for {0}: {1}",
                     rsp.CommonOutput.InputReference,
-                    Encoding.UTF8.GetString(rspBody));
+                    Encoding.UTF8.GetString(content.Body));
             }
 
             switch (typeof(Response))
             {
                 case Type r when r == typeof(XmlElement):
-                    if (contentType != "text/xml" && contentType != "application/xml") throw new InvalidOperationException("content type not matching the requested return type: "+ contentType);
-                    return ToXmlElement(rspBody) as Response;
+                    if (content.ContentType != "text/xml" && content.ContentType != "application/xml") throw new InvalidOperationException("content type not matching the requested return type: " + content.ContentType);
+                    return ToXmlElement(content.Body) as Response;
                 default:
                     throw new NotImplementedException("Only text/xml responses are supported at this moment");
             }
         }
 
         protected byte[] EncryptForBed(String inputRef, byte[] clearText, string contentType)
+        {
+            using (var clear = BuildKnownContent(inputRef, clearText, contentType))
+            {
+                return EncryptForService(clear, Level.B_Level);
+            }
+        }
+
+        protected async Task<byte[]> EncryptForBedAsync(String inputRef, byte[] clearText, string contentType)
+        {
+            using (var clear = BuildKnownContent(inputRef, clearText, contentType))
+            {
+                return await EncryptForServiceAsync(clear, Level.B_Level).ConfigureAwait(false);
+            }
+        }
+
+        private MemoryStream BuildKnownContent(String inputRef, byte[] clearText, string contentType)
         {
             XNamespace ns_e = "urn:be:cin:encrypted";
             var ekc = new XDocument(
@@ -158,23 +232,35 @@ namespace Egelke.EHealth.Client.Services
                         )
                 );
             }
-            using (var clear = ToMemoryStream(ekc))
-            {
-                return EncryptForService(clear, Level.B_Level);
-            }
+            return ToMemoryStream(ekc);
         }
 
         protected byte[] DecryptForKnown(byte[] cypherText, out string contentType)
         {
-            XmlElement clearEl = Decrypt<XmlElement>(cypherText);
+            DecryptedContent content = DecryptForKnown(cypherText);
+            contentType = content.ContentType;
+            return content.Body;
+        }
 
+        private DecryptedContent DecryptForKnown(byte[] cypherText)
+        {
+            return ParseKnownContent(Decrypt<XmlElement>(cypherText));
+        }
+
+        private async Task<DecryptedContent> DecryptForKnownAsync(byte[] cypherText)
+        {
+            return ParseKnownContent(await DecryptAsync<XmlElement>(cypherText).ConfigureAwait(false));
+        }
+
+        private static DecryptedContent ParseKnownContent(XmlElement clearEl)
+        {
             XmlNamespaceManager encMngr = new XmlNamespaceManager(clearEl.OwnerDocument.NameTable);
             encMngr.AddNamespace("e", CIN_ENC_NS);
 
             string businessContentStr = clearEl.SelectSingleNode("/e:EncryptedKnownContent/e:BusinessContent", encMngr)?.InnerText;
-            contentType = clearEl.SelectSingleNode("/e:EncryptedKnownContent/e:BusinessContent/@ContentType", encMngr)?.Value;
+            string contentType = clearEl.SelectSingleNode("/e:EncryptedKnownContent/e:BusinessContent/@ContentType", encMngr)?.Value;
             //todo::support content encoding
-            return Convert.FromBase64String(businessContentStr);
+            return new DecryptedContent(Convert.FromBase64String(businessContentStr), contentType);
         }
 
     }

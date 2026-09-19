@@ -25,22 +25,36 @@ namespace Egelke.EHealth.Client.Services.EtkDepot
 
         public EncryptionToken[] GetEtk(params IdentifierType[] searchCriteria)
         {
-            var req = new GetEtkRequest1()
+            var req = BuildRequest(searchCriteria);
+            return ParseResponse(Channel.GetEtk(req)?.GetEtkResponse);
+        }
+
+        public async Task<EncryptionToken[]> GetEtkAsync(params IdentifierType[] searchCriteria)
+        {
+            var req = BuildRequest(searchCriteria);
+            return ParseResponse((await Channel.GetEtkAsync(req).ConfigureAwait(false))?.GetEtkResponse);
+        }
+
+        private GetEtkRequest1 BuildRequest(IdentifierType[] searchCriteria)
+        {
+            _logger?.LogInformation("Retreiving Etk(s) from depot, # criteria={0}", searchCriteria?.Length);
+            foreach (IdentifierType identifier in searchCriteria)
+            {
+                _logger?.LogDebug("Retreiving Etk from depot for {0}={1}, {2}",
+                    identifier.Type, identifier.Value, identifier.ApplicationID);
+            }
+            return new GetEtkRequest1()
             {
                 GetEtkRequest = new GetEtkRequest()
                 {
                     SearchCriteria = searchCriteria
                 }
             };
+        }
 
-            _logger?.LogInformation("Retreiving Etk(s) from depot, # criteria={}", searchCriteria?.Length);
-            foreach (IdentifierType identifier in searchCriteria)
-            {
-                _logger?.LogDebug("Retreiving Etk from depot for {0}={1}, {2}",
-                    identifier.Type, identifier.Value, identifier.ApplicationID);
-            }
-            var rsp = Channel.GetEtk(req)?.GetEtkResponse;
-            _logger?.LogInformation("Retrived Etk(s) from depot: Status={0}, Message=\"{1}\", # items={1}",
+        private EncryptionToken[] ParseResponse(GetEtkResponse rsp)
+        {
+            _logger?.LogInformation("Retrived Etk(s) from depot: Status={0}, Message=\"{1}\", # items={2}",
                 rsp?.Status?.Code, rsp?.Status?.Message?.FirstOrDefault()?.Value, rsp?.Items?.Length);
 
             if (rsp?.Status?.Code != "200")

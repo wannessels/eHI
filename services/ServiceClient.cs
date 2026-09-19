@@ -158,7 +158,17 @@ namespace Egelke.EHealth.Client.Services
             return Encrypt(clearText, level, Service.Etk);
         }
 
+        protected Task<byte[]> EncryptForServiceAsync<ClearType>(ClearType clearText, Level level = Level.B_Level) where ClearType : class
+        {
+            return EncryptAsync(clearText, level, Service.Etk);
+        }
+
         protected byte[] Encrypt<ClearType>(ClearType clearText, Level level, params EncryptionToken[] recepients) where ClearType : class
+        {
+            return EncryptAsync(clearText, level, recepients).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        protected async Task<byte[]> EncryptAsync<ClearType>(ClearType clearText, Level level, params EncryptionToken[] recepients) where ClearType : class
         {
             Stream clearStream;
             switch (clearText)
@@ -185,7 +195,7 @@ namespace Egelke.EHealth.Client.Services
             var senderFactory = new DataSealerFactory();
             var sender = senderFactory.Create(level, base.ClientCredentials.ClientCertificate.Certificate);
 
-            using (Stream cypherStream = sender.Seal(clearStream, recepients))
+            using (Stream cypherStream = await sender.SealAsync(clearStream, recepients).ConfigureAwait(false))
             {
                 return ToByteArray(cypherStream);
             }
@@ -199,11 +209,16 @@ namespace Egelke.EHealth.Client.Services
 
         protected ClearType Decrypt<ClearType>(byte[] cypherText) where ClearType : class
         {
+            return DecryptAsync<ClearType>(cypherText).ConfigureAwait(false).GetAwaiter().GetResult();
+        }
+
+        protected async Task<ClearType> DecryptAsync<ClearType>(byte[] cypherText) where ClearType : class
+        {
             var receiverFactory = new DataUnsealerFactory();
             var receiver = receiverFactory.Create(Level.B_Level, Store, ExpiredStores.ToArray());
 
             Stream cypherStream = new MemoryStream(cypherText);
-            UnsealResult result = receiver.Unseal(cypherStream);
+            UnsealResult result = await receiver.UnsealAsync(cypherStream).ConfigureAwait(false);
 
             if (result.SecurityInformation.ValidationStatus != ValidationStatus.Valid)
                 throw new SecurityException("Clear text not valid");

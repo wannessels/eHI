@@ -36,5 +36,17 @@ namespace Egelke.EHealth.Client.Services.Tsa
 
             return rspMsg.SignResponse;
         }
+
+        public async Task<SignResponse> StampAsync(SignRequest request)
+        {
+            var reqMsg = new stampRequest()
+            {
+                SignRequest = request
+            };
+
+            var rspMsg = await Channel.stampAsync(reqMsg).ConfigureAwait(false);
+
+            return rspMsg.SignResponse;
+        }
     }
 }

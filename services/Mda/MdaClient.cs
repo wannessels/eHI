@@ -9,6 +9,7 @@ using System.ServiceModel;
 using System.ServiceModel.Channels;
 using System.ServiceModel.Description;
 using System.Text;
+using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
 using Egelke.EHealth.Client.Pki;
@@ -76,22 +77,51 @@ namespace Egelke.EHealth.Client.Services.Mda
 
         public IEnumerable<XmlElement> Consult(XmlElement query, bool etee = false)
         {
-            XmlNamespaceManager reqMngr = new XmlNamespaceManager(query.OwnerDocument.NameTable);
-            reqMngr.AddNamespace("saml2p", SAML2P_NS);
-            reqMngr.AddNamespace("saml2", SAML2_NS);
-
-            string reqId = query.SelectSingleNode("/saml2p:AttributeQuery/@ID", reqMngr)?.Value?.Substring(1);
+            string reqId = ExtractQueryId(query);
 
             var req = CreateRequest<SendRequestMemberDataType>(reqId, query, etee ? EncryptionType.EncryptedForKnownBED : (EncryptionType?) null);
-            _logger?.LogInformation("Calling MyCareNet MDA, ref={0}", req.CommonInput.InputReference);
-            _logger?.LogDebug("Calling MyCareNet MDA {0} with query: {1}", req.CommonInput.InputReference, query.OuterXml);
+            LogCall(req, query);
 
             ResponseReturnType rtn = Channel.memberDataConsultation(
                     new memberDataConsultationRequest() {  MemberDataConsultationRequest = req }
                 )?.MemberDataConsultationResponse?.Return;
 
-            XmlElement rsp = HandleReturn<XmlElement>( rtn );
+            return ParseAssertions(HandleReturn<XmlElement>(rtn));
+        }
 
+        public async Task<IEnumerable<XmlElement>> ConsultAsync(XmlElement query, bool etee = false)
+        {
+            string reqId = ExtractQueryId(query);
+
+            var req = await CreateRequestAsync<SendRequestMemberDataType>(reqId, query, etee ? EncryptionType.EncryptedForKnownBED : (EncryptionType?)null).ConfigureAwait(false);
+            LogCall(req, query);
+
+            memberDataConsultationResponse response = await Channel.memberDataConsultationAsync(
+                    new memberDataConsultationRequest() { MemberDataConsultationRequest = req }
+                ).ConfigureAwait(false);
+            ResponseReturnType rtn = response?.MemberDataConsultationResponse?.Return;
+
+            return ParseAssertions(await HandleReturnAsync<XmlElement>(rtn).ConfigureAwait(false));
+        }
+
+        private static string ExtractQueryId(XmlElement query)
+        {
+            XmlNamespaceManager reqMngr = new XmlNamespaceManager(query.OwnerDocument.NameTable);
+            reqMngr.AddNamespace("saml2p", SAML2P_NS);
+            reqMngr.AddNamespace("saml2", SAML2_NS);
+
+            return query.SelectSingleNode("/saml2p:AttributeQuery/@ID", reqMngr)?.Value?.Substring(1);
+        }
+
+        private void LogCall(SendRequestMemberDataType req, XmlElement query)
+        {
+            _logger?.LogInformation("Calling MyCareNet MDA, ref={0}", req.CommonInput.InputReference);
+            if (_logger?.IsEnabled(LogLevel.Debug) == true)
+                _logger.LogDebug("Calling MyCareNet MDA {0} with query: {1}", req.CommonInput.InputReference, query.OuterXml);
+        }
+
+        private static IEnumerable<XmlElement> ParseAssertions(XmlElement rsp)
+        {
             XmlNamespaceManager rspMngr = new XmlNamespaceManager(rsp.OwnerDocument.NameTable);
             rspMngr.AddNamespace("saml2p", SAML2P_NS);
             rspMngr.AddNamespace("saml2", SAML2_NS);
