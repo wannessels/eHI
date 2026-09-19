@@ -115,18 +115,31 @@ namespace Egelke.EHealth.Etee.Crypto.Status
         None = 2
     }
 
-    internal class StatusHelper<TViolation>
+    internal static class StatusHelper<TViolation>
+        where TViolation : struct
     {
-        private static readonly Type type = typeof(TViolation);
+        private static readonly Dictionary<TViolation, ValidationStatus> validation = new Dictionary<TViolation, ValidationStatus>();
+        private static readonly Dictionary<TViolation, TrustStatus> trust = new Dictionary<TViolation, TrustStatus>();
+
+        static StatusHelper()
+        {
+            Type type = typeof(TViolation);
+            foreach (TViolation violation in Enum.GetValues(type))
+            {
+                var field = type.GetField(Enum.GetName(type, violation));
+                validation[violation] = ((ValidationResultAttribute[])field.GetCustomAttributes(typeof(ValidationResultAttribute), false))[0].Result;
+                trust[violation] = ((TrustLevelAttribute[])field.GetCustomAttributes(typeof(TrustLevelAttribute), false))[0].Level;
+            }
+        }
 
         public static ValidationStatus GetValidationStatus(TViolation violation)
         {
-            return ((ValidationResultAttribute[])type.GetField(Enum.GetName(type, violation)).GetCustomAttributes(typeof(ValidationResultAttribute), false))[0].Result;
+            return validation[violation];
         }
 
         public static TrustStatus GetTrustStatus(TViolation violation)
         {
-            return ((TrustLevelAttribute[])type.GetField(Enum.GetName(type, violation)).GetCustomAttributes(typeof(TrustLevelAttribute), false))[0].Level;
+            return trust[violation];
         }
     }
 

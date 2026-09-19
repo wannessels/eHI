@@ -572,7 +572,7 @@ namespace Egelke.EHealth.Etee.Crypto
         {
             //Construct the chain of certificates
             Chain chain = timemarkKey.Signer.BuildChain(timemarkKey.SigningTime == default ? DateTime.UtcNow : timemarkKey.SigningTime, extraStore);
-            if (chain.ChainStatus.Count(x => x.Status != X509ChainStatusFlags.NoError) > 0)
+            if (chain.ChainStatus.Any(x => x.Status != X509ChainStatusFlags.NoError))
             {
                 logger?.LogError("The certification chain of {0} failed with errors", chain.ChainElements[0].Certificate.Subject);
                 throw new InvalidMessageException(string.Format("The certificate chain of the signer {0} fails basic validation", timemarkKey.Signer.Subject));
@@ -594,8 +594,11 @@ namespace Egelke.EHealth.Etee.Crypto
 
         private TimeStampToken GetTimestamp(TimemarkKey timemarkKey)
         {
-            SHA256 sha = SHA256.Create();
-            byte[] signatureHash = sha.ComputeHash(timemarkKey.SignatureValue);
+            byte[] signatureHash;
+            using (SHA256 sha = SHA256.Create())
+            {
+                signatureHash = sha.ComputeHash(timemarkKey.SignatureValue);
+            }
             if (logger?.IsEnabled(LogLevel.Debug) == true)
                 logger.LogDebug("SHA-256 hashed the signature value from {0} to {1}", Convert.ToBase64String(timemarkKey.SignatureValue), Convert.ToBase64String(signatureHash));
 
@@ -635,7 +638,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
             Chain chain = timemarkKey.Signer.BuildChain(timemarkKey.SigningTime, chainExtraStore, crls, ocsps);
             X509CertificateHelper.DisposeAll(chainExtraStore);
-            if (chain.ChainStatus.Count(x => x.Status != X509ChainStatusFlags.NoError) > 0)
+            if (chain.ChainStatus.Any(x => x.Status != X509ChainStatusFlags.NoError))
             {
                 logger?.LogError("The certificate chain of the signer {0} failed with {1} issues: {2}, {3}", timemarkKey.Signer.Subject,
                     chain.ChainStatus.Count, chain.ChainStatus[0].Status, chain.ChainStatus[0].StatusInformation);
@@ -652,7 +655,7 @@ namespace Egelke.EHealth.Etee.Crypto
             logger?.LogDebug("Start getting revocation values for TST, having {0} OCSP's and {1} CRL's", ocsps.Count, crls.Count);
 
             Timestamp ts = tst.Validate(crls, ocsps);
-            if (ts.TimestampStatus.Count(x => x.Status != X509ChainStatusFlags.NoError) > 0)
+            if (ts.TimestampStatus.Any(x => x.Status != X509ChainStatusFlags.NoError))
             {
                 logger?.LogError("The certificate chain of the time-stamp signer {0} failed with {1} issues: {2}, {3}", ts.CertificateChain.ChainElements[0].Certificate.Subject,
                 ts.TimestampStatus.Count, ts.TimestampStatus[0].Status, ts.TimestampStatus[0].StatusInformation);

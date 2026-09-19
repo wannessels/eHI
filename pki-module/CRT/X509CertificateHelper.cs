@@ -307,21 +307,23 @@ namespace Egelke.EHealth.Client.Pki
                     .Cast<BCX.X509Certificate>()
                     .FirstOrDefault();
             } 
-            else if (keyHash != null) 
+            else if (keyHash != null)
             {
                 //Get the signer certificate via key hash
-                var sha1 = SHA1.Create();
-                ocspSignerBc = basicOcspResp
-                    .GetCertificates()
-                    .EnumerateMatches(null)
-                    .Cast<BCX.X509Certificate>()
-                    .Where(c => {
-                        byte[] certKey = c.CertificateStructure.SubjectPublicKeyInfo.PublicKey.GetBytes();
-                        byte[] certkeyHash = sha1.ComputeHash(certKey);
-                        return Enumerable.SequenceEqual(certkeyHash, keyHash);
-                    })
-                    .FirstOrDefault();
-            } 
+                using (var sha1 = SHA1.Create())
+                {
+                    ocspSignerBc = basicOcspResp
+                        .GetCertificates()
+                        .EnumerateMatches(null)
+                        .Cast<BCX.X509Certificate>()
+                        .Where(c => {
+                            byte[] certKey = c.CertificateStructure.SubjectPublicKeyInfo.PublicKey.GetBytes();
+                            byte[] certkeyHash = sha1.ComputeHash(certKey);
+                            return Enumerable.SequenceEqual(certkeyHash, keyHash);
+                        })
+                        .FirstOrDefault();
+                }
+            }
             else
             { 
                 trace.TraceEvent(TraceEventType.Error, 0, "OCSP response for {0} does not have a ResponderID", certificate.Subject);
@@ -354,7 +356,7 @@ namespace Egelke.EHealth.Client.Pki
 
             //check if the signer may issue OCSP
             IList<DerObjectIdentifier> ocspSignerExtKeyUsage = ocspSignerBc.GetExtendedKeyUsage();
-            if (!ocspSignerExtKeyUsage.Contains(X509ObjectIdentifiers.IdPkix.Branch("3.9"))) // 1.3.6.1.5.5.7.3.9: pkix / Extended Key Purposes (KPs) / Signing Online Certificate Status Protocol (OCSP) responses
+            if (!ocspSignerExtKeyUsage.Contains(KeyPurposeID.id_kp_OCSPSigning)) // 1.3.6.1.5.5.7.3.9
                 throw new RevocationUnknownException("The OCSP is signed by a certificate that isn't allowed to sign OCSP");
 
             //finally, check if the certificate is revoked or not
@@ -507,14 +509,14 @@ namespace Egelke.EHealth.Client.Pki
             return ocspResponse;
         }
 
-        private static IQueryable<Uri> GetOCSPUris(this X509Certificate2 cert)
+        private static IEnumerable<Uri> GetOCSPUris(this X509Certificate2 cert)
         {
             X509Extension crlExtention = cert.Extensions[BCAX.X509Extensions.AuthorityInfoAccess.Id];
             if (crlExtention == null)
-                return Enumerable.Empty<Uri>().AsQueryable();
+                return Enumerable.Empty<Uri>();
 
             var aia = BCAX.AuthorityInformationAccess.GetInstance(BCA.Asn1Sequence.FromByteArray(crlExtention.RawData));
-            return aia.GetAccessDescriptions().AsQueryable()
+            return aia.GetAccessDescriptions()
                 .Where((ad) => ad.AccessMethod.Id == BCAX.AccessDescription.IdADOcsp.Id)
                 .Select((ad) => ad.AccessLocation)
                 .Where((gn) => gn.TagNo == BCAX.GeneralName.UniformResourceIdentifier && gn.Name is BCA.DerStringBase)
@@ -583,14 +585,14 @@ namespace Egelke.EHealth.Client.Pki
             }
         }
 
-        private static IQueryable<Uri> GetCrlWebUris(this X509Certificate2 cert)
+        private static IEnumerable<Uri> GetCrlWebUris(this X509Certificate2 cert)
         {
             X509Extension crlExtention = cert.Extensions[BCAX.X509Extensions.CrlDistributionPoints.Id];
             if (crlExtention == null)
-                return Enumerable.Empty<Uri>().AsQueryable(); ;
+                return Enumerable.Empty<Uri>();
 
             var distributionPoint = BCAX.CrlDistPoint.GetInstance(BCA.Asn1Sequence.FromByteArray(crlExtention.RawData));
-            return distributionPoint.GetDistributionPoints().AsQueryable()
+            return distributionPoint.GetDistributionPoints()
                 .Select((dp) => dp.DistributionPointName.Name)
                 .Cast<BCAX.GeneralNames>()
                 .SelectMany((gns) => gns.GetNames())
@@ -614,7 +616,7 @@ namespace Egelke.EHealth.Client.Pki
         private static void AddErrorStatus(List<X509ChainStatus> status, X509ChainStatus extraStatus)
         {
             status.RemoveAll(x => x.Status == X509ChainStatusFlags.NoError);
-            if (status.Count(x => x.Status == extraStatus.Status) == 0) status.Add(extraStatus);
+            if (!status.Any(x => x.Status == extraStatus.Status)) status.Add(extraStatus);
         }
     }
 }

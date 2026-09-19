@@ -81,15 +81,19 @@ namespace Egelke.EHealth.Client.Pki
 
             //create the hash according to the specs of the time-stamp
             var hashAlogOid = new Oid(tst.TimeStampInfo.HashAlgorithm.Algorithm.Id);
-            var hashAlgo = (HashAlgorithm)CryptoConfig.CreateFromName(hashAlogOid.FriendlyName);
-            byte[] signatureValueHashed = hashAlgo.ComputeHash(data);
+            byte[] signatureValueHashed;
+            using (var hashAlgo = (HashAlgorithm)CryptoConfig.CreateFromName(hashAlogOid.FriendlyName))
+            {
+                signatureValueHashed = hashAlgo.ComputeHash(data);
+            }
 
             //verify the hash value
             byte[] timestampHash = tst.TimeStampInfo.TstInfo.MessageImprint.GetHashedMessage();
 
-            trace.TraceEvent(TraceEventType.Verbose, 0, "Comparing the calculated hash ({3}) {1} with {2} for TST {0}", tst.TimeStampInfo.SerialNumber,
-                Convert.ToBase64String(signatureValueHashed), Convert.ToBase64String(timestampHash), hashAlogOid.FriendlyName);
-            return ((IStructuralEquatable)signatureValueHashed).Equals(timestampHash, StructuralComparisons.StructuralEqualityComparer);
+            if (trace.Switch.ShouldTrace(TraceEventType.Verbose))
+                trace.TraceEvent(TraceEventType.Verbose, 0, "Comparing the calculated hash ({3}) {1} with {2} for TST {0}", tst.TimeStampInfo.SerialNumber,
+                    Convert.ToBase64String(signatureValueHashed), Convert.ToBase64String(timestampHash), hashAlogOid.FriendlyName);
+            return signatureValueHashed.SequenceEqual(timestampHash);
         }
 
         private static BC::X509Certificate GetSigner(this TimeStampToken tst, X509Certificate2Collection extraStore)

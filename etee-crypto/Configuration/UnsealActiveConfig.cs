@@ -81,9 +81,11 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         {
             get
             {
-                return new EncryptionKeySizeActiveConfig();
+                return minimumEncryptionKeySize;
             }
         }
+
+        private static readonly EncryptionKeySizeActiveConfig minimumEncryptionKeySize = new EncryptionKeySizeActiveConfig();
 
         public ReadOnlyCollection<SignatureAlgorithm> SignatureAlgorithms
         {

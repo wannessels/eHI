@@ -47,6 +47,26 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
     {
         //private static TraceSource trace = new TraceSource("Egelke.EHealth.Etee");
 
+        private static readonly Dictionary<X509ChainStatusFlags, CertSecurityViolation> ChainStatusViolations = BuildChainStatusViolations();
+
+        private static Dictionary<X509ChainStatusFlags, CertSecurityViolation> BuildChainStatusViolations()
+        {
+            var map = new Dictionary<X509ChainStatusFlags, CertSecurityViolation>();
+            foreach (X509ChainStatusFlags flag in Enum.GetValues(typeof(X509ChainStatusFlags)))
+            {
+                string name = Enum.GetName(typeof(X509ChainStatusFlags), flag);
+                if (Enum.IsDefined(typeof(CertSecurityViolation), name))
+                    map[flag] = (CertSecurityViolation)Enum.Parse(typeof(CertSecurityViolation), name);
+            }
+            return map;
+        }
+
+        private static CertSecurityViolation ToViolation(X509ChainStatusFlags status)
+        {
+            if (ChainStatusViolations.TryGetValue(status, out CertSecurityViolation violation)) return violation;
+            throw new ArgumentException("Unsupported chain status: " + status, nameof(status));
+        }
+
         public static byte[] GetSubjectKeyIdentifier(this Org.BouncyCastle.X509.X509Certificate cert)
         {
             Asn1OctetString ski = cert.GetExtensionValue(X509Extensions.SubjectKeyIdentifier);
@@ -149,9 +169,10 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 //update the link, the chain hands out its own copy of the certificate
                 dest.Certificate?.Dispose();
                 dest.Certificate = ce.Certificate;
-                foreach (X509ChainStatus status in ce.ChainElementStatus.Where(x => x.Status != X509ChainStatusFlags.NoError))
+                foreach (X509ChainStatus status in ce.ChainElementStatus)
                 {
-                    dest.securityViolations.Add((CertSecurityViolation)Enum.Parse(typeof(CertSecurityViolation), Enum.GetName(typeof(X509ChainStatusFlags), status.Status)));
+                    if (status.Status != X509ChainStatusFlags.NoError)
+                        dest.securityViolations.Add(ToViolation(status.Status));
                 }
 
                 //prepare the next link
@@ -159,7 +180,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 dest = new CertificateSecurityInformation();
             }
 
-            if (chain.ChainStatus.Count(x => x.Status == X509ChainStatusFlags.PartialChain) > 0)
+            if (chain.ChainStatus.Any(x => x.Status == X509ChainStatusFlags.PartialChain))
             {
                 result.securityViolations.Add(CertSecurityViolation.IssuerTrustUnknown);
             }

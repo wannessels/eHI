@@ -19,7 +19,12 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
 
         public override int GetHashCode(byte[] obj)
         {
-            return new BigInteger(obj).GetHashCode();
+            unchecked
+            {
+                int hash = (int)2166136261;
+                foreach (byte b in obj) hash = (hash ^ b) * 16777619;
+                return hash;
+            }
         }
     }
 }

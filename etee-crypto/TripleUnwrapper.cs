@@ -557,7 +557,7 @@ namespace Egelke.EHealth.Etee.Crypto
                         signingTime = stamp.Time;
                     }
 
-                    if (stamp.TimestampStatus.Count(x => x.Status != X509ChainStatusFlags.NoError) > 0)
+                    if (stamp.TimestampStatus.Any(x => x.Status != X509ChainStatusFlags.NoError))
                     {
                         logger?.LogWarning("The time-stamp is invalid with {0} errors, including {1}: {2}",
                             stamp.TimestampStatus.Count, stamp.TimestampStatus[0].Status, stamp.TimestampStatus[0].StatusInformation);
