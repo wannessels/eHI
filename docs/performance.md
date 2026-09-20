@@ -6,11 +6,11 @@ The libraries target .NET 8. Set `Settings.Default.UseNativeCrypto = true` for n
 
 Dispose directly held factory-created sealers/unsealers after active operations finish, using `(instance as IDisposable)?.Dispose()`. Service clients retire and dispose their owned contexts automatically. Caller-owned certificates, stores and WebKeys must outlive active operations.
 
-Native signing, encryption, verification, decryption and completion stream payloads. `InMemorySize` controls when each native stage spills to disk; known large stages start on disk. Native metadata decoding has a separate 16 MiB-per-layer default limit (`MaximumNativeMetadataSize`). Keep admission limits appropriate to the task's memory and temporary-storage budget. See the [streaming measurements](native-streaming-performance.md): allocation fell substantially, with a latency cost in the local profile. The [earlier allocation reductions](native-memory-improvements.md) describe the previous buffered implementation.
+Native signing, encryption, verification, decryption and completion stream payloads. `Settings.Default.InMemorySize` is the per-stream spill threshold: streams above it go to temporary files, and known large stages start there. It defaults to `long.MaxValue`, so nothing spills and no temporary file is created unless the application sets a finite size at startup (the temporary-file path costs about twice the CPU per request). Native metadata decoding has a separate 16 MiB-per-layer default limit (`MaximumNativeMetadataSize`). Keep admission limits appropriate to the task's memory and temporary-storage budget. See the [streaming measurements](native-streaming-performance.md): allocation fell substantially, with a latency cost in the local profile. The [earlier allocation reductions](native-memory-improvements.md) describe the previous buffered implementation.
 
 Native sealing now pipelines the nested CMS layers in one pass, eliminating its intermediate files and input replay. Unsealing is single-pass as well: the envelope is decrypted while the outer digest is computed, so nothing is spooled before inner verification/output. Payload I/O is asynchronous. Shared signer-key locks cover only the provider signature/verification call; hashing, encryption, copying and network validation do not hold those locks.
 
-The defaults are now a **16 MiB per-stream threshold**, **four shared complete operations**, and a **one-minute deadline**. The [latency/concurrency tuning guide](fargate-latency-tuning.md) contains the measurements for the 4-vCPU/16-GiB target, Server-GC results, and benchmark limits. All three values remain configurable.
+The defaults are now **no spill threshold** (everything stays in memory), **four shared complete operations**, and a **one-minute deadline**. The [latency/concurrency tuning guide](fargate-latency-tuning.md) contains the measurements for the 4-vCPU/16-GiB target, Server-GC results, and benchmark limits. All three values remain configurable.
 ## Metrics
 
 The libraries publish metrics through `System.Diagnostics.Metrics` on the meter `Egelke.EHealth` (`EHealthMetrics.MeterName`). Nothing leaves the process unless the application subscribes.
@@ -26,6 +26,8 @@ The libraries publish metrics through `System.Diagnostics.Metrics` on the meter 
 | `ehealth.revocation.downloads`, `.duration`, `.bytes` | counter, histogram, counter | `type` = `crl` or `ocsp`, `outcome` | Evidence downloads |
 | `ehealth.sts.requests`, `.duration` | counter, histogram | `type` = `issue` or `renew`, `outcome` | SAML token requests |
 | `ehealth.timestamp.requests`, `.duration` | counter, histogram | `outcome` | RFC 3161 requests |
+| `ehealth.spools`, `ehealth.spool.bytes` | counters | `storage` = `memory` or `file` | Payload spools created and bytes written to them |
+| `ehealth.spool.spills` | counter | | Spools that outgrew `InMemorySize` and moved to a temporary file |
 | `ehealth.revocation.cache.entries`, `.bytes`, `ehealth.chain.cache.entries`, `ehealth.certificate.cache.entries`, `ehealth.key.cache.entries` | observable gauges | | Cache sizes |
 
 A nested call (a chain build inside an unseal, a timestamp inside a seal, the STS inside a service call) is part of the enclosing operation; only the dedicated instruments above count it separately. Queue duration above a few milliseconds means `OperationPolicy` concurrency is the bottleneck; `platform` chain builds and evidence downloads should stay rare once the caches are warm.
@@ -45,7 +47,7 @@ Locally, `dotnet-counters monitor --counters Egelke.EHealth --process-id <pid>` 
 No configuration is required to use the defaults. To override them for the application, configure once at startup:
 
 ```csharp
-Settings.Default.InMemorySize = 32L * 1024 * 1024;
+Settings.Default.InMemorySize = 64L * 1024 * 1024; // spill streams above 64 MiB to temporary files; the default never spills
 OperationPolicy.Default = new OperationPolicy(maximumConcurrency: 8, timeout: TimeSpan.FromSeconds(45));
 ```
 

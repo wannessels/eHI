@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System;
 using System.IO;
 using System.Threading;
@@ -23,7 +24,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 long capacity = Math.Min(threshold, expectedLength + 16 * 1024);
                 if (capacity <= int.MaxValue) { storage.Dispose(); storage = new MemoryStream((int)capacity); }
             }
+            EHealthMetrics.Spools.Add(1, Storage());
         }
+        private TagList Storage() => new TagList { { "storage", storage is MemoryStream ? "memory" : "file" } };
         internal static long Remaining(Stream stream) => stream.CanSeek ? Math.Max(0, stream.Length - stream.Position) : 0;
         private void Reserve(int count)
         {
@@ -32,11 +35,11 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 var file = new WindowsTempFileStream(true);
                 try { long position = storage.Position; storage.Position = 0; OperationScope.Copy(storage, file); file.Position = position; }
                 catch { file.Dispose(); throw; }
-                storage.Dispose(); storage = file;
+                storage.Dispose(); storage = file; EHealthMetrics.SpoolSpills.Add(1);
             }
         }
-        public override void Write(byte[] buffer, int offset, int count) { Reserve(count); storage.Write(buffer, offset, count); }
-        public override void Write(ReadOnlySpan<byte> buffer) { Reserve(buffer.Length); storage.Write(buffer); }
+        public override void Write(byte[] buffer, int offset, int count) => Write(buffer.AsSpan(offset, count));
+        public override void Write(ReadOnlySpan<byte> buffer) { Reserve(buffer.Length); storage.Write(buffer); EHealthMetrics.SpoolBytes.Add(buffer.Length, Storage()); }
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken token = default)
         {
             if (storage is MemoryStream && Math.Max(storage.Length, checked(storage.Position + buffer.Length)) > threshold)
@@ -44,9 +47,10 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 var file = new WindowsTempFileStream(true);
                 try { long position = storage.Position; storage.Position = 0; await storage.CopyToAsync(file, 81920, token).ConfigureAwait(false); file.Position = position; }
                 catch { file.Dispose(); throw; }
-                storage.Dispose(); storage = file;
+                storage.Dispose(); storage = file; EHealthMetrics.SpoolSpills.Add(1);
             }
             await storage.WriteAsync(buffer, token).ConfigureAwait(false);
+            EHealthMetrics.SpoolBytes.Add(buffer.Length, Storage());
         }
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token) => WriteAsync(buffer.AsMemory(offset, count), token).AsTask();
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default) => storage.ReadAsync(buffer, token);

@@ -37,6 +37,12 @@ namespace Egelke.EHealth.Client.Pki
         public static readonly Counter<long> TimestampRequests = meter.CreateCounter<long>("ehealth.timestamp.requests", "{request}", "RFC 3161 timestamp requests by outcome");
         /// <summary>RFC 3161 timestamp request duration.</summary>
         public static readonly Histogram<double> TimestampRequestDuration = meter.CreateHistogram<double>("ehealth.timestamp.request.duration", "ms", "RFC 3161 timestamp request duration");
+        /// <summary>Payload spools created, tagged by storage (memory or file).</summary>
+        public static readonly Counter<long> Spools = meter.CreateCounter<long>("ehealth.spools", "{spool}", "Payload spools created by storage");
+        /// <summary>Spools that outgrew the in-memory threshold and moved to a temporary file.</summary>
+        public static readonly Counter<long> SpoolSpills = meter.CreateCounter<long>("ehealth.spool.spills", "{spool}", "Spools moved from memory to a temporary file");
+        /// <summary>Bytes written to spools, tagged by storage.</summary>
+        public static readonly Counter<long> SpoolBytes = meter.CreateCounter<long>("ehealth.spool.bytes", "By", "Bytes written to payload spools by storage");
         static EHealthMetrics()
         {
             meter.CreateObservableGauge("ehealth.revocation.cache.entries", () => (long)RevocationCache.Count, "{entry}", "Retained revocation evidence entries");

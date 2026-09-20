@@ -51,14 +51,17 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         public TimeSpan TimestampGracePeriod { get; set; }
 
         /// <summary>
-        /// The size of the message before the temp file directory is used instead of a memory stream.
+        /// Streams larger than this many bytes spill to temporary files; smaller ones stay in memory.
         /// </summary>
         /// <value>
         /// <para>
-        /// The default value is 16777216 bytes (16 MiB). Configure this at application startup.
+        /// Defaults to <see cref="long.MaxValue"/>: nothing spills and no temporary file is created. Set a finite
+        /// size at application startup to use temporary files above it, for example
+        /// <c>Settings.Default.InMemorySize = 64L * 1024 * 1024;</c> to spill streams above 64 MiB.
         /// </para>
         /// <para>
-        /// This is a per-stream threshold, not a cap on total process memory.
+        /// This is a per-stream threshold, not a cap on total process memory; the metrics
+        /// <c>ehealth.spools</c>, <c>ehealth.spool.spills</c> and <c>ehealth.spool.bytes</c> show what happens.
         /// </para>
         /// </value>
         public long InMemorySize { get; set; }
@@ -96,7 +99,7 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         private Settings()
         {
             TimestampGracePeriod = new TimeSpan(0, 5, 0);
-            InMemorySize = 16L * 1024 * 1024;
+            InMemorySize = long.MaxValue;
             SignRetries = Environment.OSVersion.Platform == PlatformID.Win32NT ? 4 : 0;
         }
     }

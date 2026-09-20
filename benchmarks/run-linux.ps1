@@ -6,7 +6,7 @@ param(
     [ValidateRange(1, 10000)][int]$Requests = 32,
     [ValidateRange(1, 16)][int]$CpuLimit = 1,
     [ValidateRange(1, 64)][int]$MemoryGiB = 1,
-    [ValidateRange(0, 1024)][int]$ThresholdMiB = 16,
+    [ValidateRange(-1, 4096)][int]$ThresholdMiB = -1,
     [ValidateRange(1, 1024)][int]$Prescribers = 16,
     [ValidateRange(0, 10000000)][int]$CitizenCrlEntries = 350000,
     [ValidateRange(0, 10000000)][int]$EHealthCrlEntries = 20000,
@@ -22,7 +22,7 @@ New-Item -ItemType Directory -Force -Path $profileOutput | Out-Null
 $profileCommit = git -C $profileRepo rev-parse HEAD
 $profileName = "backends-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' })
 if ($Suite -eq 'native-memory') { $profileName = "native-streaming-$($PayloadMiB)mib-t$ThresholdMiB-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
-if ($Suite -eq 'crypto-concurrency') { $profileName = "crypto-$($PayloadKiB)kib-c$Concurrency-t$ThresholdMiB-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
+if ($Suite -eq 'crypto-concurrency') { $profileName = "crypto-$($PayloadKiB)kib-c$Concurrency-t$(if ($ThresholdMiB -lt 0) { 'default' } else { $ThresholdMiB })-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
 if ($Suite -eq 'keys') { $profileName = "keys-net8-$($CpuLimit)cpu-$($MemoryGiB)g" }
 if ($Suite -eq 'pharmacy') { $profileName = "pharmacy-c$Concurrency-p$Prescribers-crl$CitizenCrlEntries$(if ($Backend -eq 'bouncycastle') { '-bc' } else { '' })-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
 if ($ServerGC) { $profileName += '-server' }

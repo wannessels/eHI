@@ -29,7 +29,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             {
                 OperationScope.Cancellation.ThrowIfCancellationRequested();
                 if (input.CanSeek) { Stream = input; return; }
-                Stream = new TempFileStreamFactory().CreateNew(); owned = true;
+                Stream = new CryptoSpool(); owned = true;
                 try { OperationScope.Copy(input, Stream); Stream.Position = 0; }
                 catch { Stream.Dispose(); throw; }
             }

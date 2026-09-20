@@ -12,8 +12,8 @@ internal static class ConcurrentCryptoProfiles
 {
     internal static async Task<object> RunAsync(int bytes, int concurrency, int requests, int thresholdMiB)
     {
-        if (bytes < 1 || thresholdMiB < 0) throw new ArgumentOutOfRangeException();
-        Settings.Default.InMemorySize = checked((long)thresholdMiB * 1024 * 1024);
+        if (bytes < 1) throw new ArgumentOutOfRangeException(nameof(bytes));
+        if (thresholdMiB >= 0) Settings.Default.InMemorySize = checked((long)thresholdMiB * 1024 * 1024);
         using var rsa = RSA.Create(2048); var sender = new WebKey(rsa);
         var recipient = new SecretKey(new byte[] { 1 }, RandomNumberGenerator.GetBytes(16));
         var sealer = new DataSealerFactory(NullLoggerFactory.Instance, true).Create(Level.B_Level, sender);
@@ -36,7 +36,7 @@ internal static class ConcurrentCryptoProfiles
         try
         {
             var rounds = await ClosedLoop.RunAsync(concurrency, requests, Request);
-            return new { Method = "Closed-loop workers; per-request latency includes dispatch, shared admission and seal+unseal. Immutable input is shared. Fresh process per scenario; no external services.", PayloadBytes = bytes, ThresholdMiB = thresholdMiB, Rounds = rounds };
+            return new { Method = "Closed-loop workers; per-request latency includes dispatch, shared admission and seal+unseal. Immutable input is shared. Fresh process per scenario; no external services.", PayloadBytes = bytes, ThresholdMiB = thresholdMiB, InMemorySize = Settings.Default.InMemorySize, Rounds = rounds };
         }
         finally { (sealer as IDisposable)?.Dispose(); (receiver as IDisposable)?.Dispose(); }
     }
