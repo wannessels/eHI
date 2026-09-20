@@ -9,6 +9,8 @@ Dispose directly held factory-created sealers/unsealers after active operations 
 Native signing, encryption, verification, decryption and completion stream payloads. `InMemorySize` controls when each native stage spills to disk; known large stages start on disk. Native metadata decoding has a separate 16 MiB-per-layer default limit (`MaximumNativeMetadataSize`). Keep admission limits appropriate to the task's memory and temporary-storage budget. See the [streaming measurements](native-streaming-performance.md): allocation fell substantially, with a latency cost in the local profile. The [earlier allocation reductions](native-memory-improvements.md) describe the previous buffered implementation.
 
 Native sealing now pipelines the nested CMS layers in one pass, eliminating its intermediate files and input replay. Unsealing decrypts directly into inner verification/output, removing another temporary stage. Payload I/O is asynchronous. Shared signer-key locks cover only the provider signature/verification call; hashing, encryption, copying and network validation do not hold those locks. Admission remains shared and bounded; the default limit has not been raised.
+
+For the measured 4-vCPU/16-GiB target, the [latency/concurrency tuning guide](fargate-latency-tuning.md) recommends starting with a 16 MiB stream threshold and four active crypto-heavy operations. It includes startup configuration, unchanged-default comparisons, Server-GC results and the limits of the component benchmark.
 ## Admission, cancellation and caching
 
 Use one shared policy for clients belonging to the same application capacity budget:

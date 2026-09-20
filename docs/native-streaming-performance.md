@@ -1,5 +1,7 @@
 # Native CMS streaming on .NET 8
 
+This historical snapshot measures the initial staged streaming implementation. See the [single-pass latency/concurrency results and 4-vCPU/16-GiB tuning](fargate-latency-tuning.md) for the current implementation.
+
 Native mode now streams signing, encryption, verification, decryption and completion. It remains selected by `Settings.Default.UseNativeCrypto = true`, the default. The BouncyCastle backend is still available with `false`. No additional streaming flag is required.
 
 ## Measured memory and latency

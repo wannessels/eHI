@@ -55,3 +55,5 @@ The [native streaming report](../docs/native-streaming-performance.md) measures 
 ```
 
 The executable accepts `--suite crypto-concurrency --payload-kib 8192 --concurrency 4 --requests 32 --threshold-mib 1`. Each scenario should run in a fresh process. Closed-loop workers share a sealer, unsealer, RSA-2048 key and immutable input, matching client context reuse. One shared admission policy bounds the complete seal/unseal request. Five warm-up requests precede three measured rounds. Workers wait on a start barrier; request latency includes dispatch, admission and both crypto operations, and throughput is completed requests per second. Per-request mean/p50/p95, peak active requests, allocations, CPU and process peak memory appear under `concurrencyDetails`. This measures steady concurrency, not an external arrival-rate/overload queue or live SOAP service. `-ThresholdMiB` varies the per-stream memory allowance, and `-CpuLimit`/`-MemoryGiB` set the container limits.
+
+Add `-ServerGC` to compare Server GC; the raw metadata records the actual runtime mode. See the [4-vCPU/16-GiB report](../docs/fargate-latency-tuning.md) for all 24 before/after and tuning profiles.

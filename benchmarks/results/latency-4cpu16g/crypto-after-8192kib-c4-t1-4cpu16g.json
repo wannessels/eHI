@@ -1,0 +1,74 @@
+{
+  "metadata": {
+    "StartedUtc": "2026-09-20T11:05:47.5253104Z",
+    "SourceCommit": "0805eebfb132aad7d0cb55ab624a047c2c2ce0d1",
+    "Framework": ".NET 8.0.31",
+    "OS": "Debian GNU/Linux 12 (bookworm)",
+    "Architecture": "X64",
+    "ProcessorCount": 4,
+    "Cpu": "model name\t: AMD Ryzen 7 PRO 4750U with Radeon Graphics",
+    "CpuLimit": "400000 100000",
+    "MemoryLimit": "17179869184",
+    "ServerGC": false,
+    "TieredCompilation": "runtime-default",
+    "WarmupOperationsPerScenario": 5,
+    "Quick": false,
+    "Rounds": 3,
+    "Notes": "Release, warmed scenarios; process-wide allocations include server allocations for HTTP; peak working set is cumulative. Local Docker is not AWS Fargate."
+  },
+  "results": [],
+  "httpDetails": null,
+  "concurrencyDetails": {
+    "Method": "Closed-loop workers; per-request latency includes dispatch, shared admission and seal\u002Bunseal. Immutable input is shared. Fresh process per scenario; no external services.",
+    "Rounds": [
+      {
+        "Round": 1,
+        "PayloadBytes": 8388608,
+        "Concurrency": 4,
+        "PeakActiveRequests": 4,
+        "Requests": 32,
+        "ThresholdMiB": 1,
+        "MeanMs": 165.80309062500004,
+        "P50Ms": 156.7588,
+        "P95Ms": 227.9653,
+        "RequestsPerSecond": 23.88981063741598,
+        "AllocatedBytesPerRequest": 985694.75,
+        "CpuMsPerRequest": 166.875,
+        "Gen2": 0,
+        "ProcessPeakWorkingSet": 79167488
+      },
+      {
+        "Round": 2,
+        "PayloadBytes": 8388608,
+        "Concurrency": 4,
+        "PeakActiveRequests": 4,
+        "Requests": 32,
+        "ThresholdMiB": 1,
+        "MeanMs": 163.75721249999998,
+        "P50Ms": 160.8286,
+        "P95Ms": 193.1028,
+        "RequestsPerSecond": 24.289872299791675,
+        "AllocatedBytesPerRequest": 953807,
+        "CpuMsPerRequest": 166.25,
+        "Gen2": 0,
+        "ProcessPeakWorkingSet": 83361792
+      },
+      {
+        "Round": 3,
+        "PayloadBytes": 8388608,
+        "Concurrency": 4,
+        "PeakActiveRequests": 4,
+        "Requests": 32,
+        "ThresholdMiB": 1,
+        "MeanMs": 191.73978125,
+        "P50Ms": 192.3929,
+        "P95Ms": 254.8925,
+        "RequestsPerSecond": 20.38331330248149,
+        "AllocatedBytesPerRequest": 945693.25,
+        "CpuMsPerRequest": 196.25,
+        "Gen2": 0,
+        "ProcessPeakWorkingSet": 83361792
+      }
+    ]
+  }
+}
