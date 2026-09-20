@@ -66,6 +66,11 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         /// </value>
         public long InMemorySize { get; set; }
 
+        /// <summary>
+        /// Maximum bytes of freed spool memory kept in the pool for reuse. Defaults to 256 MiB and is read when the pool is first used, so set it at startup.
+        /// </summary>
+        public long SpoolPoolBytes { get; set; }
+
         private int maximumNativeMetadataSize = 16 * 1024 * 1024;
         /// <summary>Maximum aggregate encoded metadata decoded per native CMS layer, excluding payloads. Defaults to 16 MiB.</summary>
         public int MaximumNativeMetadataSize
@@ -100,6 +105,7 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         {
             TimestampGracePeriod = new TimeSpan(0, 5, 0);
             InMemorySize = long.MaxValue;
+            SpoolPoolBytes = 256L * 1024 * 1024;
             SignRetries = Environment.OSVersion.Platform == PlatformID.Win32NT ? 4 : 0;
         }
     }

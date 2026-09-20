@@ -1,3 +1,4 @@
+using Microsoft.IO;
 using System.Diagnostics;
 using System;
 using System.IO;
@@ -12,19 +13,24 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
     // lengths must not allow a stage to silently exceed the memory threshold.
     internal sealed class CryptoSpool : Stream
     {
-        private Stream storage = new MemoryStream();
+        private static readonly RecyclableMemoryStreamManager pool = CreatePool();
+        private Stream storage;
         private readonly long threshold = Math.Max(0, Settings.Default.InMemorySize);
         internal CryptoSpool(long expectedLength = 0)
         {
-            if (expectedLength > threshold) { storage.Dispose(); storage = new WindowsTempFileStream(true); }
-            else if (expectedLength > 0 && expectedLength <= int.MaxValue)
-            {
-                // Reserve the known payload plus modest CMS overhead without repeated
-                // MemoryStream growth/LOH copies when the configured budget permits it.
-                long capacity = Math.Min(threshold, expectedLength + 16 * 1024);
-                if (capacity <= int.MaxValue) { storage.Dispose(); storage = new MemoryStream((int)capacity); }
-            }
+            if (expectedLength > threshold) storage = new WindowsTempFileStream(true);
+            else storage = pool.GetStream("spool", expectedLength > 0 ? Math.Min(threshold, expectedLength + 16 * 1024) : 0);
             EHealthMetrics.Spools.Add(1, Storage());
+        }
+        private static RecyclableMemoryStreamManager CreatePool()
+        {
+            var manager = new RecyclableMemoryStreamManager(new RecyclableMemoryStreamManager.Options
+            {
+                BlockSize = 256 * 1024, MaximumSmallPoolFreeBytes = Math.Max(0, Settings.Default.SpoolPoolBytes), MaximumLargePoolFreeBytes = 0, ZeroOutBuffer = true
+            });
+            EHealthMetrics.Meter.CreateObservableGauge("ehealth.spool.pool.bytes", () => manager.SmallPoolInUseSize, "By", "Pooled spool memory in use");
+            EHealthMetrics.Meter.CreateObservableGauge("ehealth.spool.pool.free.bytes", () => manager.SmallPoolFreeSize, "By", "Pooled spool memory kept for reuse");
+            return manager;
         }
         private TagList Storage() => new TagList { { "storage", storage is MemoryStream ? "memory" : "file" } };
         internal static long Remaining(Stream stream) => stream.CanSeek ? Math.Max(0, stream.Length - stream.Position) : 0;
