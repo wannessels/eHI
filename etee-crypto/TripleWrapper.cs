@@ -25,7 +25,8 @@ namespace Egelke.EHealth.Etee.Crypto
         private readonly ITimestampProvider timestampProvider;
         private readonly X509Certificate2Collection extraStore;
         private readonly ILogger<TripleWrapper> logger;
-        private readonly ConcurrentDictionary<X509Certificate2, Lazy<AsymmetricAlgorithm>> keys = new();
+        private readonly ConcurrentDictionary<X509Certificate2, SigningKeyPool> keys = new();
+        private readonly Lazy<SigningKeyPool> webKeyPool;
         protected int disposed;
         internal TripleWrapper(Level level, WebKey ownWebKey, ITimestampProvider timestampProvider, ILogger<TripleWrapper> logger = null)
             : this(level, null, null, timestampProvider, null, logger) { this.ownWebKey = ownWebKey; }
@@ -34,18 +35,21 @@ namespace Egelke.EHealth.Etee.Crypto
             if (level == Level.L_Level || level == Level.A_level) throw new ArgumentException("Invalid sealing level", nameof(level));
             this.level = level; this.authentication = authentication; this.signature = signature ?? authentication;
             this.timestampProvider = timestampProvider; this.extraStore = extraStore; this.logger = logger;
+            webKeyPool = new Lazy<SigningKeyPool>(() => SigningKeyPool.ForWebKey(this.ownWebKey.NativeKey, Settings.Default.SigningKeyHandles));
         }
         public virtual void Dispose()
         {
             if (Interlocked.Exchange(ref disposed, 1) != 0) return;
-            foreach (var key in keys.Values) if (key.IsValueCreated) key.Value.Dispose();
+            foreach (var pool in keys.Values) pool.Dispose();
             keys.Clear();
+            if (webKeyPool.IsValueCreated) webKeyPool.Value.Dispose();
         }
-        private AsymmetricAlgorithm Key(X509Certificate2 cert)
+        private SigningKeyPool Pool(X509Certificate2 cert)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
-            return keys.GetOrAdd(cert, value => new Lazy<AsymmetricAlgorithm>(() =>
-                (AsymmetricAlgorithm)value.GetRSAPrivateKey() ?? value.GetECDsaPrivateKey() ?? throw new CryptographicException("A native RSA or ECDSA private key is required"))).Value;
+            if (cert == null) return webKeyPool.Value;
+            return keys.GetOrAdd(cert, value => new SigningKeyPool(() =>
+                (AsymmetricAlgorithm)value.GetRSAPrivateKey() ?? value.GetECDsaPrivateKey() ?? throw new CryptographicException("A native RSA or ECDSA private key is required"), Settings.Default.SigningKeyHandles));
         }
         public Stream Seal(Stream input, params EncryptionToken[] recipients) => SealAsync(input, recipients).GetAwaiter().GetResult();
         public Stream Seal(Stream input, params X509Certificate2[] recipients) => SealAsync(input, recipients).GetAwaiter().GetResult();
@@ -70,7 +74,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 using var inner = new NativeSigningWriter(encrypted.Content, signature != null);
                 await OperationScope.CopyAsync(input, inner).ConfigureAwait(false);
                 var innerDigest = await inner.CompleteContentAsync().ConfigureAwait(false);
-                var innerMetadata = SignDigest(innerDigest, signature);
+                var innerMetadata = await SignDigestAsync(innerDigest, signature).ConfigureAwait(false);
                 await CompleteCoreAsync(innerMetadata, signature, signature == authentication ? null : level & ~Level.T_Level).ConfigureAwait(false);
                 inner.CompleteMetadata(innerMetadata);
                 await encrypted.CompleteAsync().ConfigureAwait(false);
@@ -79,7 +83,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 for (int retry = 0; ; retry++)
                 {
                     OperationScope.Cancellation.ThrowIfCancellationRequested();
-                    try { outerMetadata = SignDigest(outerDigest, authentication); break; }
+                    try { outerMetadata = await SignDigestAsync(outerDigest, authentication).ConfigureAwait(false); break; }
                     catch (CryptographicException) when (retry < Settings.Default.SignRetries)
                     { await Task.Delay((int)Math.Pow(10, retry + 1), OperationScope.Cancellation).ConfigureAwait(false); }
                 }
@@ -89,12 +93,10 @@ namespace Egelke.EHealth.Etee.Crypto
             }
             catch { result.Dispose(); throw; }
         }
-        private SignedCms SignDigest(byte[] digest, X509Certificate2 certificate)
-            => NativeStreamingCms.SignDigest(digest, certificate, certificate == null ? ownWebKey.NativeKey : Key(certificate), ownWebKey?.Id);
-        protected void SignDetached(Stream signed, Stream unsigned, X509Certificate2 selectedCert)
+        private async Task<SignedCms> SignDigestAsync(byte[] digest, X509Certificate2 certificate)
         {
-            var cms = NativeStreamingCms.Sign(unsigned, selectedCert, Key(selectedCert), null);
-            byte[] bytes = cms.Encode(); signed.Write(bytes, 0, bytes.Length);
+            using var lease = await Pool(certificate).RentAsync(OperationScope.Cancellation).ConfigureAwait(false);
+            return NativeStreamingCms.SignDigest(digest, certificate, lease.Key, ownWebKey?.Id);
         }
         public Stream Complete(Stream data) => CompleteAsync(data).GetAwaiter().GetResult();
         public Stream Complete(Stream data, out TimemarkKey key)

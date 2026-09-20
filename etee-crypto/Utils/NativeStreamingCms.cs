@@ -16,24 +16,6 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
     internal static class NativeStreamingCms
     {
         private const string MessageDigest = "1.2.840.113549.1.9.4", ContentType = "1.2.840.113549.1.9.3";
-        internal static byte[] Hash(Stream input, HashAlgorithmName algorithm)
-        {
-            using var hash = IncrementalHash.CreateHash(algorithm);
-            byte[] buffer = ArrayPool<byte>.Shared.Rent(81920);
-            try
-            {
-                int count;
-                while (true)
-                {
-                    OperationScope.Cancellation.ThrowIfCancellationRequested(); count = input.Read(buffer, 0, buffer.Length);
-                    if (count == 0) break; hash.AppendData(buffer, 0, count);
-                }
-                return hash.GetHashAndReset();
-            }
-            finally { ArrayPool<byte>.Shared.Return(buffer, true); }
-        }
-        internal static SignedCms Sign(Stream content, X509Certificate2 certificate, AsymmetricAlgorithm key, byte[] id)
-            => SignDigest(Hash(content, HashAlgorithmName.SHA256), certificate, key, id);
         internal static SignedCms SignDigest(byte[] digest, X509Certificate2 certificate, AsymmetricAlgorithm key, byte[] id)
         {
             var attributes = new AsnWriter(AsnEncodingRules.DER);

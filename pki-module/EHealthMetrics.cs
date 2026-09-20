@@ -44,6 +44,8 @@ namespace Egelke.EHealth.Client.Pki
         public static readonly Counter<long> SpoolSpills = Meter.CreateCounter<long>("ehealth.spool.spills", "{spool}", "Spools moved from memory to a temporary file");
         /// <summary>Bytes written to spools, tagged by storage.</summary>
         public static readonly Counter<long> SpoolBytes = Meter.CreateCounter<long>("ehealth.spool.bytes", "By", "Bytes written to payload spools by storage");
+        /// <summary>Time waiting for a private-key handle before signing.</summary>
+        public static readonly Histogram<double> SigningQueueDuration = Meter.CreateHistogram<double>("ehealth.signing.queue.duration", "ms", "Time waiting for a signing-key handle");
         static EHealthMetrics()
         {
             Meter.CreateObservableGauge("ehealth.revocation.cache.entries", () => (long)RevocationCache.Count, "{entry}", "Retained revocation evidence entries");
