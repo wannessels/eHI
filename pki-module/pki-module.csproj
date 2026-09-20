@@ -1,7 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net462;net6.0</TargetFrameworks>
+    <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>Egelke.EHealth.Client.Pki</RootNamespace>
     <AssemblyName>Egelke.EHealth.Client.Pki</AssemblyName>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
@@ -12,7 +11,7 @@
     <Copyright>Copyright © Egelke 2014-2025</Copyright>
     <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
     <RepositoryType>git</RepositoryType>
-	<RepositoryUrl>https://github.com/egelke/eHI</RepositoryUrl>
+    <RepositoryUrl>https://github.com/egelke/eHI</RepositoryUrl>
     <AssemblyVersion>3.0.0.2</AssemblyVersion>
     <FileVersion>3.0.0.2</FileVersion>
     <PackageTags>eHealth eSigning TimeStamp PKI PKCS#12 X509</PackageTags>
@@ -20,34 +19,20 @@
     <SignAssembly>true</SignAssembly>
     <IncludeSource>true</IncludeSource>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-	<PackageReadmeFile>README.md</PackageReadmeFile>
-	<DocumentationFile>bin\$(Configuration)\$(TargetFramework)\Egelke.EHealth.Client.Pki.xml</DocumentationFile>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <DocumentationFile>bin\$(Configuration)\$(TargetFramework)\Egelke.EHealth.Client.Pki.xml</DocumentationFile>
   </PropertyGroup>
-
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
     <AssemblyOriginatorKeyFile>..\debug.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
-
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <AssemblyOriginatorKeyFile>..\release.snk</AssemblyOriginatorKeyFile>
   </PropertyGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)' == 'net462'">
-    <Reference Include="System.ServiceModel" />
-    <Reference Include="System.Net.Http" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-	  <!--These are extention pacakges for .Net Standard 2.0; don't expect updates since .Net Standard is fixed -->
-	<PackageReference Include="System.Security.Cryptography.Cng" Version="[5.0.0,)" />
-	<PackageReference Include="System.Security.Cryptography.OpenSSL" Version="[5.0.0,)" />
-  </ItemGroup>
-
   <ItemGroup>
-    <PackageReference Include="BouncyCastle.Cryptography" Version="[2.6.0,)" />
-    <PackageReference Include="System.Buffers" Version="4.5.1" Condition="'$(TargetFramework)' != 'net6.0'" />
-	<None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
-
-
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.12" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.12" />
+  </ItemGroup>
 </Project>

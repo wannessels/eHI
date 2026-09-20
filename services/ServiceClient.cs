@@ -46,8 +46,8 @@ namespace Egelke.EHealth.Client.Services
             }
         }
 
-        private readonly ResourceCache<Tuple<Level, X509Certificate2, bool>, IDataSealer> sealers =
-            new ResourceCache<Tuple<Level, X509Certificate2, bool>, IDataSealer>((a, b) => a.Item1 == b.Item1 && ReferenceEquals(a.Item2, b.Item2) && a.Item3 == b.Item3);
+        private readonly ResourceCache<Tuple<Level, X509Certificate2>, IDataSealer> sealers =
+            new ResourceCache<Tuple<Level, X509Certificate2>, IDataSealer>((a, b) => a.Item1 == b.Item1 && ReferenceEquals(a.Item2, b.Item2));
         private readonly ResourceCache<EHealthP12[], IDataUnsealer> unsealers =
             new ResourceCache<EHealthP12[], IDataUnsealer>((a, b) => a.Length == b.Length && a.Zip(b, ReferenceEquals).All(equal => equal));
         private readonly DataSealerFactory sealerFactory = new DataSealerFactory(NullLoggerFactory.Instance);
@@ -231,7 +231,7 @@ namespace Egelke.EHealth.Client.Services
                         _logger.LogDebug("encrypted content: {0}", reader.ReadToEnd());
                     clearStream.Position = position;
                 }
-                using (var lease = sealers.Acquire(Tuple.Create(level, ClientCredentials.ClientCertificate.Certificate, Etee.Crypto.Configuration.Settings.Default.UseNativeRsaPss),
+                using (var lease = sealers.Acquire(Tuple.Create(level, ClientCredentials.ClientCertificate.Certificate),
                     identity => sealerFactory.Create(identity.Item1, identity.Item2)))
                 using (Stream cypherStream = await lease.Value.SealAsync(clearStream, recepients).ConfigureAwait(false))
                 {

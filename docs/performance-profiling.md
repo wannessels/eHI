@@ -1,5 +1,7 @@
 # Performance profiling results
 
+> Historical snapshot: these measurements predate the complete .NET 8 native-cryptography migration. See [the migration guide](native-crypto-migration.md); the old feature flag no longer selects a backend.
+
 Measured on 2026-09-19 UTC (2026-09-20 Brussels), production source commit `f10ac4c`, in a local Docker Linux container limited to **1 CPU and 1 GiB RAM**. Runtime: .NET 10.0.12, Ubuntu 24.04.5, x64, workstation GC; host CPU: AMD Ryzen 7 PRO 4750U. This is a controlled local profile, **not an AWS Fargate capacity measurement**.
 
 [Reproduction and methodology](../benchmarks/README.md) · [Default-runtime results](../benchmarks/results/linux-1cpu-1g.json) · [JIT-tiering-disabled control](../benchmarks/results/linux-1cpu-1g-no-tiering.json)

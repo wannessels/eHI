@@ -19,12 +19,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Org.BouncyCastle.Asn1;
 
 /// <summary>
 /// The certificate or other object is revoked.
 /// </summary>
-public class RevocationException<T> : Exception where T : Asn1Encodable
+public class RevocationException<T> : Exception
 {
     /// <summary>
     /// The object with the revocation info

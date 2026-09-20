@@ -21,8 +21,6 @@ using System.Linq;
 using System.Text;
 using System.Xml;
 using System.Security.Cryptography.X509Certificates; 
-using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.Asn1;
 using System.ServiceModel.Channels;
 using System.Security.Cryptography.Xml;
 using Egelke.EHealth.Client.Helper;
@@ -330,9 +328,9 @@ namespace Egelke.EHealth.Client.Sts.Saml11
 
         private static String FormatX509Name(X500DistinguishedName name)
         {
-            Asn1StreamParser parser = new Asn1StreamParser(name.RawData);
-            X509Name _name = X509Name.GetInstance(parser.ReadObject().ToAsn1Object());
-            return _name.ToString(true, X509Name.RFC1779Symbols);
+
+
+            return Egelke.EHealth.Client.Pki.CryptoEncoding.FormatDistinguishedNameRfc1779(name);
         }
 
 

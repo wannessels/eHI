@@ -1,7 +1,8 @@
+using CertificateList = Egelke.EHealth.Client.Pki.CertificateRevocationList;
+using BasicOcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+using OcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+using TimeStampToken = System.Security.Cryptography.Pkcs.Rfc3161TimestampToken;
 
-using Org.BouncyCastle.Asn1.Ocsp;
-using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.Tsp;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -100,9 +101,9 @@ namespace Egelke.EHealth.Client.Pki.Test
         [Fact]
         public void FedictTs_InternalTime_ProvideCrl()
         {
-            CertificateList crl1 = CertificateList.GetInstance(File.ReadAllBytes("files/fedictTs1.crl"));
-            CertificateList crl2 = CertificateList.GetInstance(File.ReadAllBytes("files/fedictTs2.crl"));
-            CertificateList crl3 = CertificateList.GetInstance(File.ReadAllBytes("files/fedictTs3.crl"));
+            CertificateList crl1 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs1.crl"));
+            CertificateList crl2 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs2.crl"));
+            CertificateList crl3 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs3.crl"));
             IList<CertificateList> crls = new List<CertificateList>(new CertificateList[] { crl1, crl2, crl3 });
             IList<BasicOcspResponse> ocps = new List<BasicOcspResponse>(new BasicOcspResponse[] { });
             TimeStampToken tst = File.ReadAllBytes("files/fedictTs.ts").ToTimeStampToken();
@@ -134,9 +135,9 @@ namespace Egelke.EHealth.Client.Pki.Test
         [Fact]
         public void FedictTs_ProvidedTime_ProvideCrl()
         {
-            CertificateList crl1 = CertificateList.GetInstance(File.ReadAllBytes("files/fedictTs1.crl"));
-            CertificateList crl2 = CertificateList.GetInstance(File.ReadAllBytes("files/fedictTs2.crl"));
-            CertificateList crl3 = CertificateList.GetInstance(File.ReadAllBytes("files/fedictTs3.crl"));
+            CertificateList crl1 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs1.crl"));
+            CertificateList crl2 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs2.crl"));
+            CertificateList crl3 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs3.crl"));
             IList<CertificateList> crls = new List<CertificateList>(new CertificateList[] { crl1, crl2, crl3 });
             IList<BasicOcspResponse> ocps = new List<BasicOcspResponse>(new BasicOcspResponse[] { });
             TimeStampToken tst = File.ReadAllBytes("files/fedictTs.ts").ToTimeStampToken();
@@ -166,9 +167,9 @@ namespace Egelke.EHealth.Client.Pki.Test
         [Fact]
         public void FedictTs_ProvidedTime_ProvideOutdatedCrl()
         {
-            CertificateList crl1 = CertificateList.GetInstance(File.ReadAllBytes("files/fedictTs1.crl"));
-            CertificateList crl2 = CertificateList.GetInstance(File.ReadAllBytes("files/fedictTs2.crl"));
-            CertificateList crl3 = CertificateList.GetInstance(File.ReadAllBytes("files/fedictTs3.crl"));
+            CertificateList crl1 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs1.crl"));
+            CertificateList crl2 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs2.crl"));
+            CertificateList crl3 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs3.crl"));
             IList<CertificateList> crls = new List<CertificateList>(new CertificateList[] { crl1, crl2 });
             IList<BasicOcspResponse> ocps = new List<BasicOcspResponse>(new BasicOcspResponse[] { });
             TimeStampToken tst = File.ReadAllBytes("files/fedictTs.ts").ToTimeStampToken();

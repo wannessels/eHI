@@ -1,7 +1,8 @@
+using CertificateList = Egelke.EHealth.Client.Pki.CertificateRevocationList;
+using BasicOcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+using OcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+using TimeStampToken = System.Security.Cryptography.Pkcs.Rfc3161TimestampToken;
 
-using Org.BouncyCastle.Asn1;
-using Org.BouncyCastle.Asn1.Ocsp;
-using Org.BouncyCastle.Asn1.X509;
 
 using System;
 using System.Collections.Generic;
@@ -105,11 +106,11 @@ namespace Egelke.EHealth.Client.Pki.Test
 
             IList<CertificateList> crls = new List<CertificateList>
             {
-                CertificateList.GetInstance(Asn1Sequence.GetInstance(File.ReadAllBytes(@"files/Citizen201204.crl")))
+                CertificateList.Parse(File.ReadAllBytes(@"files/Citizen201204.crl"))
             };
             IList<BasicOcspResponse> ocsps = new List<BasicOcspResponse>
             {
-                BasicOcspResponse.GetInstance(Asn1Sequence.GetInstance(File.ReadAllBytes(@"files/eid79021802145.ocsp")))
+                BasicOcspResponse.Parse(File.ReadAllBytes(@"files/eid79021802145.ocsp"))
             };
             Chain rsp = target.BuildChain(new DateTime(2014, 03, 05, 18, 00, 00, DateTimeKind.Utc), extraStore, crls, ocsps);
 

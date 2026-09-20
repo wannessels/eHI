@@ -17,19 +17,17 @@
  */
 
 using System;
+using System.Security.Cryptography.Pkcs;
+using System.Formats.Asn1;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
-using Org.BouncyCastle.Pkcs;
 using System.Collections;
 using System.Security.Cryptography.X509Certificates;
-using Org.BouncyCastle.Asn1;
-using Org.BouncyCastle.Security;
 using System.Text.RegularExpressions;
 using Microsoft.Win32.SafeHandles;
 using System.Security.Cryptography;
-using Org.BouncyCastle.Asn1.Microsoft;
 
 namespace Egelke.EHealth.Client.Pki
 {
@@ -38,10 +36,9 @@ namespace Egelke.EHealth.Client.Pki
     /// </summary>
     public class EHealthP12 : IDictionary<String, X509Certificate2>, IDisposable
     {
-//        private const String SnRegExPattern = @"SERIALNUMBER=(?<sn>\d+)";
+        //        private const String SnRegExPattern = @"SERIALNUMBER=(?<sn>\d+)";
         private const String SnRegExPattern = @"SSIN=(?<sn>\d+)";
 
-        private static readonly DerObjectIdentifier MicrosoftEnhancedRsaAndAes = MicrosoftObjectIdentifiers.Microsoft.Branch("17.1"); //(1.3.6.1.4.1.311.)17.1
 
         /// <summary>
         /// Find the last version of the eHealth p12 file based on the inss of the provided eid cert.
@@ -59,14 +56,14 @@ namespace Egelke.EHealth.Client.Pki
             string sn = snMatch.Groups["sn"].Value;
 
 
-            string[] files = Directory.GetFiles(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + @"\ehealth\keystore", "SSIN=" + sn + "*p12");
+            string[] files = Directory.GetFiles(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "ehealth", "keystore"), "SSIN=" + sn + "*p12");
             Array.Sort(files);
 
             return files[files.Length - 1];
         }
 
         private readonly string password;
-        private readonly Pkcs12Store store;
+        private readonly Dictionary<string, X509Certificate2> store = new Dictionary<string, X509Certificate2>(StringComparer.OrdinalIgnoreCase);
         private readonly ConcurrentDictionary<string, Lazy<X509Certificate2>> certs = new ConcurrentDictionary<string, Lazy<X509Certificate2>>();
         private List<string> aliases;
 
@@ -75,16 +72,7 @@ namespace Egelke.EHealth.Client.Pki
         /// </summary>
         /// <param name="file">Path to p12 store</param>
         /// <param name="pwd">The store password</param>
-        public EHealthP12(String file, String pwd)
-        {
-            password = pwd;
-            using (FileStream fileStream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
-            {
-                store = new Pkcs12StoreBuilder().Build();
-                store.Load(fileStream, pwd.ToCharArray());
-                fileStream.Close();
-            }
-        }
+        public EHealthP12(String file, String pwd) : this(File.ReadAllBytes(file), pwd) { }
 
         /// <summary>
         /// Create instance from memory
@@ -94,14 +82,66 @@ namespace Egelke.EHealth.Client.Pki
         public EHealthP12(byte[] data, String pwd)
         {
             password = pwd;
-            using (MemoryStream memStream = new MemoryStream(data))
+            var info = Pkcs12Info.Decode(data, out int read);
+            if (read != data.Length) throw new CryptographicException("Trailing PKCS#12 data");
+            if (info.IntegrityMode != Pkcs12IntegrityMode.Password && info.IntegrityMode != Pkcs12IntegrityMode.None) throw new CryptographicException("Unsupported PKCS#12 integrity mode");
+            X509Certificate2Collection imported = null;
+            try
             {
-                store = new Pkcs12StoreBuilder().Build();
-                store.Load(memStream, pwd.ToCharArray());
-                memStream.Close();
+                imported = X509CertificateLoader.LoadPkcs12Collection(data, pwd, X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+                var bags = new List<Pkcs12SafeBag>();
+                foreach (var contents in info.AuthenticatedSafe)
+                {
+                    if (contents.ConfidentialityMode == Pkcs12ConfidentialityMode.Password) contents.Decrypt(pwd);
+                    if (contents.ConfidentialityMode != Pkcs12ConfidentialityMode.None) throw new CryptographicException("Unsupported PKCS#12 confidentiality mode");
+                    CollectBags(contents, bags);
+                }
+                LoadBags(bags, imported);
+            }
+            catch { foreach (var cert in store.Values.Distinct()) cert.Dispose(); throw; }
+            finally { if (imported != null) foreach (var cert in imported) cert.Dispose(); }
+        }
+        private static void CollectBags(Pkcs12SafeContents contents, List<Pkcs12SafeBag> bags)
+        {
+            foreach (var bag in contents.GetBags())
+                if (bag is Pkcs12SafeContentsBag nested) CollectBags(nested.SafeContents, bags); else bags.Add(bag);
+        }
+        private static string BagAttribute(Pkcs12SafeBag bag, string oid)
+        {
+            var matches = bag.Attributes.Cast<CryptographicAttributeObject>().Where(a => a.Oid.Value == oid).ToArray();
+            if (matches.Length == 0) return null;
+            if (matches.Length != 1 || matches[0].Values.Count != 1) throw new CryptographicException("Ambiguous PKCS#12 attribute");
+            var reader = new AsnReader(matches[0].Values[0].RawData, AsnEncodingRules.DER);
+            string result = oid == "1.2.840.113549.1.9.20" ? reader.ReadCharacterString(UniversalTagNumber.BMPString) : Convert.ToHexString(reader.ReadOctetString());
+            reader.ThrowIfNotEmpty(); return result;
+        }
+        private void LoadBags(List<Pkcs12SafeBag> bags, X509Certificate2Collection imported)
+        {
+            const string friendly = "1.2.840.113549.1.9.20", localId = "1.2.840.113549.1.9.21";
+            var certificates = bags.OfType<Pkcs12CertBag>().Where(b => b.IsX509Certificate).ToArray();
+            // Key-bag aliases are independent of the friendly names on their certificate bags.
+            foreach (var bag in bags.Where(b => b is Pkcs12KeyBag || b is Pkcs12ShroudedKeyBag))
+            {
+                string id = BagAttribute(bag, localId), alias = BagAttribute(bag, friendly);
+                var certificateBag = id == null ? null : certificates.FirstOrDefault(c => BagAttribute(c, localId) == id);
+                using var cert = certificateBag?.GetCertificate();
+                var candidates = imported.Cast<X509Certificate2>().Where(c => c.HasPrivateKey && (cert == null || c.RawData.AsSpan().SequenceEqual(cert.RawData))).ToArray();
+                if (candidates.Length != 1) throw new CryptographicException("Ambiguous or missing PKCS#12 key association");
+                alias ??= id?.ToLowerInvariant() ?? Convert.ToHexString(CryptoEncoding.SubjectKeyIdentifier(candidates[0])).ToLowerInvariant();
+                SetCertificate(alias, new X509Certificate2(candidates[0]));
+            }
+            foreach (var bag in certificates)
+            {
+                string alias = BagAttribute(bag, friendly);
+                if (alias == null || store.TryGetValue(alias, out var existing) && existing.HasPrivateKey) continue;
+                SetCertificate(alias, bag.GetCertificate());
             }
         }
-
+        private void SetCertificate(string alias, X509Certificate2 value)
+        {
+            if (store.TryGetValue(alias, out var previous)) previous.Dispose();
+            store[alias] = value;
+        }
         /// <summary>
         /// The aliases in the store.
         /// </summary>
@@ -109,7 +149,7 @@ namespace Egelke.EHealth.Client.Pki
         {
             get
             {
-                if (aliases == null) aliases = store.Aliases.Cast<String>().ToList<String>();
+                if (aliases == null) aliases = store.Keys.ToList();
                 return aliases;
             }
         }
@@ -179,7 +219,7 @@ namespace Egelke.EHealth.Client.Pki
         {
             if (key == null) throw new ArgumentNullException("key");
 
-            return store.ContainsAlias(key);
+            return store.ContainsKey(key);
         }
 
         /// <summary>
@@ -203,7 +243,7 @@ namespace Egelke.EHealth.Client.Pki
         {
             if (key == null) new ArgumentNullException("key");
 
-            if (store.ContainsAlias(key))
+            if (store.ContainsKey(key))
             {
                 value = GetAsDotNet(key);
                 return true;
@@ -214,7 +254,7 @@ namespace Egelke.EHealth.Client.Pki
                 return false;
             }
         }
-        
+
         /// <summary>
         /// Add certificate with the provided alias.
         /// </summary>
@@ -299,7 +339,8 @@ namespace Egelke.EHealth.Client.Pki
         /// </summary>
         public int Count
         {
-            get {
+            get
+            {
                 return store.Count;
             }
         }
@@ -309,7 +350,8 @@ namespace Egelke.EHealth.Client.Pki
         /// </summary>
         public bool IsReadOnly
         {
-            get {
+            get
+            {
                 return true;
             }
         }
@@ -410,42 +452,16 @@ namespace Egelke.EHealth.Client.Pki
                 if (entry.IsValueCreated) entry.Value.Dispose();
             }
             certs.Clear();
+            foreach (var cert in store.Values.Distinct()) cert.Dispose();
+            store.Clear();
         }
 
         private X509Certificate2 GetAsDotNet(string entryAlias, X509KeyStorageFlags flags)
         {
-            Org.BouncyCastle.Pkcs.X509CertificateEntry certificateEntry = store.GetCertificate(entryAlias);
-            if (store.IsKeyEntry(entryAlias))
-            {
-                //Get the org key entry
-                AsymmetricKeyEntry orgKeyEntry = store.GetKey(entryAlias);
-
-                //Copy it into a new key attribute with the windows CSP defined
-                Dictionary<DerObjectIdentifier, Asn1Encodable> newKeyEntryAttributes = new Dictionary<DerObjectIdentifier, Asn1Encodable>();
-                foreach (DerObjectIdentifier attribute in orgKeyEntry.BagAttributeKeys) 
-                {
-                    newKeyEntryAttributes.Add(attribute, orgKeyEntry[attribute]);
-                }
-                if (!newKeyEntryAttributes.ContainsKey(MicrosoftEnhancedRsaAndAes))
-                {
-                    newKeyEntryAttributes.Add(MicrosoftEnhancedRsaAndAes, new DerBmpString("Microsoft Enhanced RSA and AES Cryptographic Provider"));
-                }
-                AsymmetricKeyEntry newKeyEntry = new AsymmetricKeyEntry(orgKeyEntry.Key, newKeyEntryAttributes);
-
-                //Make a new P12 in memory
-                Pkcs12Store newP12 = new Pkcs12StoreBuilder().Build();
-                newP12.SetKeyEntry(entryAlias, newKeyEntry, store.GetCertificateChain(entryAlias));
-                MemoryStream buffer = new MemoryStream();
-                newP12.Save(buffer, password.ToCharArray(), new SecureRandom());
-
-                //Read this P12 as X509Certificate with private key
-                return new X509Certificate2(buffer.ToArray(), password, flags);
-            }
-            else
-            {
-                return new X509Certificate2(certificateEntry.Certificate.GetEncoded());
-            }
+            var cert = store[entryAlias];
+            if ((flags & X509KeyStorageFlags.PersistKeySet) != 0 && cert.HasPrivateKey)
+                return new X509Certificate2(cert.Export(X509ContentType.Pkcs12, password), password, flags);
+            return new X509Certificate2(cert);
         }
-
     }
 }

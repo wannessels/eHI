@@ -1,755 +1,159 @@
-/*
- * This file is part of .Net ETEE for eHealth.
- * Copyright (C) 2014 Egelke
- * 
- * .Net ETEE for eHealth is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- * 
- * .Net ETEE for eHealth  is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
-
- * You should have received a copy of the GNU Lesser General Public License
- * along with .Net ETEE for eHealth.  If not, see <http://www.gnu.org/licenses/>.
- */
-
-using System.Collections.Generic;
-using System.IO;
-using System.Security.Cryptography.X509Certificates;
-using Org.BouncyCastle.Cms;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.X509.Store;
-using Egelke.EHealth.Etee.Crypto.Configuration;
-using Egelke.EHealth.Etee.Crypto.Utils;
-using BC = Org.BouncyCastle;
 using System;
 using System.Collections.Concurrent;
-using System.Threading.Tasks;
-using System.Security.Cryptography;
-using System.Collections;
-using Org.BouncyCastle.Asn1;
-using Org.BouncyCastle.Asn1.Esf;
-using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.Asn1.Ocsp;
-using Org.BouncyCastle.Asn1.Cms;
-using Egelke.EHealth.Client.Pki;
-using Org.BouncyCastle.Asn1.Pkcs;
-using Org.BouncyCastle.Tsp;
-using Egelke.EHealth.Etee.Crypto.Store;
-using Egelke.EHealth.Etee.Crypto.Sender;
+using System.IO;
 using System.Linq;
-using Org.BouncyCastle.Crypto.Operators;
+using System.Security.Cryptography;
+using System.Security.Cryptography.Pkcs;
+using System.Security.Cryptography.X509Certificates;
+using System.Threading;
+using System.Threading.Tasks;
+using Egelke.EHealth.Client.Pki;
+using Egelke.EHealth.Etee.Crypto.Configuration;
+using Egelke.EHealth.Etee.Crypto.Sender;
+using Egelke.EHealth.Etee.Crypto.Store;
+using Egelke.EHealth.Etee.Crypto.Utils;
 using Microsoft.Extensions.Logging;
-
-using System.Diagnostics;
-using Org.BouncyCastle.Utilities.Collections;
-using Org.BouncyCastle.Crypto;
-
 
 namespace Egelke.EHealth.Etee.Crypto
 {
     internal class TripleWrapper : IDataSealer, IDataCompleter, ITmaDataCompleter, IDisposable
     {
-        // BouncyCastle defaults to 1000 byte BER octet chunks
-        private const int StreamBufferSize = 64 * 1024;
-
+        private readonly Level level;
+        private readonly WebKey ownWebKey;
+        private readonly X509Certificate2 authentication, signature;
+        private readonly ITimestampProvider timestampProvider;
+        private readonly X509Certificate2Collection extraStore;
         private readonly ILogger<TripleWrapper> logger;
-        private readonly bool useNativeRsaPss = Settings.Default.UseNativeRsaPss;
-
-        private Level level;
-
-        //The sender authentication certificate
-        private X509Certificate2 authentication;
-
-        //The sender signature certificate
-        private X509Certificate2 signature;
-
-        private WebKey ownWebKey;
-
-        private ITimestampProvider timestampProvider;
-
-        private X509Certificate2Collection extraStore;
-
-        private readonly ConcurrentDictionary<X509Certificate2, Lazy<Signer>> signers = new ConcurrentDictionary<X509Certificate2, Lazy<Signer>>();
-
-        private sealed class Signer
+        private readonly ConcurrentDictionary<X509Certificate2, Lazy<AsymmetricAlgorithm>> keys = new();
+        private int disposed;
+        internal TripleWrapper(Level level, WebKey ownWebKey, ITimestampProvider timestampProvider, ILogger<TripleWrapper> logger = null)
+            : this(level, null, null, timestampProvider, null, logger) { this.ownWebKey = ownWebKey; }
+        internal TripleWrapper(Level level, X509Certificate2 authentication, X509Certificate2 signature, ITimestampProvider timestampProvider, X509Certificate2Collection extraStore, ILogger<TripleWrapper> logger = null)
         {
-            public BC::X509.X509Certificate Certificate { get; set; }
-            public BC.Crypto.ISignatureFactory SignatureFactory { get; set; }
-            public AsymmetricAlgorithm OwnedKey { get; set; }
+            if (level == Level.L_Level || level == Level.A_level) throw new ArgumentException("Invalid sealing level", nameof(level));
+            this.level = level; this.authentication = authentication; this.signature = signature ?? authentication;
+            this.timestampProvider = timestampProvider; this.extraStore = extraStore; this.logger = logger;
         }
-
         public void Dispose()
         {
-            foreach (var signer in signers.Values)
-                if (signer.IsValueCreated) signer.Value.OwnedKey?.Dispose();
-            signers.Clear();
+            if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+            foreach (var key in keys.Values) if (key.IsValueCreated) key.Value.Dispose();
+            keys.Clear();
         }
-
-        internal TripleWrapper(
-            Level level,
-            WebKey ownWebKey,
-            ITimestampProvider timestampProvider,
-            ILogger<TripleWrapper> logger = null)
+        private AsymmetricAlgorithm Key(X509Certificate2 cert)
         {
-            if (level == Level.L_Level || level == Level.A_level) throw new ArgumentException("level", "Only levels B, T, LT and LTA are allowed");
-            this.logger = logger;
-            this.level = level;
-            this.ownWebKey = ownWebKey;
-            this.timestampProvider = timestampProvider;
+            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            return keys.GetOrAdd(cert, value => new Lazy<AsymmetricAlgorithm>(() =>
+                (AsymmetricAlgorithm)value.GetRSAPrivateKey() ?? value.GetECDsaPrivateKey() ?? throw new CryptographicException("A native RSA or ECDSA private key is required"))).Value;
         }
-
-        internal TripleWrapper(
-            Level level,
-            X509Certificate2 authentication,
-            X509Certificate2 signature,
-            ITimestampProvider timestampProvider,
-            X509Certificate2Collection extraStore,
-            ILogger<TripleWrapper> logger = null)
+        public Stream Seal(Stream input, params EncryptionToken[] recipients) => SealAsync(input, recipients).GetAwaiter().GetResult();
+        public Stream Seal(Stream input, params X509Certificate2[] recipients) => SealAsync(input, recipients).GetAwaiter().GetResult();
+        public Stream Seal(Stream input, params WebKey[] recipients) => SealAsync(input, recipients).GetAwaiter().GetResult();
+        public Stream Seal(Stream input, SecretKey key, params EncryptionToken[] recipients) => SealAsync(input, key, recipients).GetAwaiter().GetResult();
+        public Stream Seal(Stream input, SecretKey key, EncryptionToken[] recipients, WebKey[] webKeys) => SealAsync(input, key, recipients, webKeys).GetAwaiter().GetResult();
+        public Task<Stream> SealAsync(Stream input, params EncryptionToken[] recipients) => SealAsync(input, null, recipients, null);
+        public Task<Stream> SealAsync(Stream input, params X509Certificate2[] recipients) => OperationPolicy.Default.RunAsync(_ => SealCoreAsync(input, null, recipients, null));
+        public Task<Stream> SealAsync(Stream input, params WebKey[] recipients) => SealAsync(input, null, null, recipients);
+        public Task<Stream> SealAsync(Stream input, SecretKey key, params EncryptionToken[] recipients) => SealAsync(input, key, recipients, null);
+        public Task<Stream> SealAsync(Stream input, SecretKey key, EncryptionToken[] recipients, WebKey[] webKeys)
+            => OperationPolicy.Default.RunAsync(_ => SealCoreAsync(input, key, recipients?.Select(t => t.ToCertificate()).ToArray(), webKeys));
+        private async Task<Stream> SealCoreAsync(Stream input, SecretKey key, X509Certificate2[] recipients, WebKey[] webKeys)
         {
-            //basic checks
-            if (level == Level.L_Level || level == Level.A_level) throw new ArgumentException("level", "Only levels B, T, LT and LTA are allowed");
-
-            this.logger = logger;
-            this.level = level;
-            this.signature = signature ?? authentication;
-            this.authentication = authentication;
-            this.timestampProvider = timestampProvider;
-            this.extraStore = extraStore;
-        }
-
-        #region DataCompleter Members
-
-        public Stream Complete(Stream sealedData)
-        {
-            return CompleteAsync(sealedData).ConfigureAwait(false).GetAwaiter().GetResult();
-        }
-
-        public Stream Complete(Stream sealedData, out TimemarkKey timemarkKey)
-        {
-            TimemarkedResult<Stream> result = CompleteWithKeyAsync(sealedData).ConfigureAwait(false).GetAwaiter().GetResult();
-            timemarkKey = result.TimemarkKey;
-            return result.Value;
-        }
-
-        public async Task<Stream> CompleteAsync(Stream sealedData)
-        {
-            return (await CompleteWithKeyAsync(sealedData).ConfigureAwait(false)).Value;
-        }
-
-        Task<TimemarkedResult<Stream>> ITmaDataCompleter.CompleteAsync(Stream sealedData)
-        {
-            return CompleteWithKeyAsync(sealedData);
-        }
-
-        private Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream sealedData)
-            => OperationPolicy.Default.RunAsync(_ => CompleteWithKeyCoreAsync(sealedData));
-
-        private async Task<TimemarkedResult<Stream>> CompleteWithKeyCoreAsync(Stream sealedData)
-        {
-            logger?.LogInformation("Completing the provided sealed message with revocation and time info according to the level {0}", this.level);
-
-            ITempStreamFactory factory = NewFactory(sealedData);
-            OperationScope.Cancellation.ThrowIfCancellationRequested();
-            Stream completed = factory.CreateNew();
-            try
+            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            if (signature == null && ownWebKey == null) throw new InvalidOperationException("A signing certificate or WebKey is required");
+            byte[] clear = NativeCms.Read(input);
+            var inner = Sign(clear, signature);
+            await CompleteCoreAsync(inner, signature, signature == authentication ? null : level & ~Level.T_Level).ConfigureAwait(false);
+            byte[] encrypted = NativeEnvelope.Encrypt(inner.Encode(), recipients, webKeys, key);
+            SignedCms outer = null;
+            for (int retry = 0; ; retry++)
             {
-                TimemarkKey timemarkKey = await CompleteAsync(this.level, completed, sealedData, null, null).ConfigureAwait(false);
-                completed.Position = 0;
-
-                return new TimemarkedResult<Stream>(completed, timemarkKey);
+                OperationScope.Cancellation.ThrowIfCancellationRequested();
+                try { outer = Sign(encrypted, authentication); break; }
+                catch (CryptographicException) when (retry < Settings.Default.SignRetries)
+                { await Task.Delay((int)Math.Pow(10, retry + 1), OperationScope.Cancellation).ConfigureAwait(false); }
             }
-            catch { completed.Dispose(); throw; }
+            await CompleteCoreAsync(outer, authentication, level).ConfigureAwait(false);
+            return ToStream(outer.Encode());
         }
-
-        #endregion
-
-        #region DataSealer Members
-
-        public Stream Seal(Stream unsealed, params EncryptionToken[] tokens)
-        {
-            return SealAsync(unsealed, tokens).ConfigureAwait(false).GetAwaiter().GetResult();
-        }
-
-        public Stream Seal(Stream unsealed, params X509Certificate2[] certs)
-        {
-            return SealAsync(unsealed, certs).ConfigureAwait(false).GetAwaiter().GetResult();
-        }
-
-        public Stream Seal(Stream unsealed, params WebKey[] webKeys)
-        {
-            return SealAsync(unsealed, webKeys).ConfigureAwait(false).GetAwaiter().GetResult();
-        }
-
-        public Stream Seal(Stream unsealed, SecretKey key, params EncryptionToken[] tokens)
-        {
-            return SealAsync(unsealed, key, tokens).ConfigureAwait(false).GetAwaiter().GetResult();
-        }
-
-        public Stream Seal(Stream unsealed, SecretKey key, EncryptionToken[] tokens, WebKey[] webKeys)
-        {
-            return SealAsync(unsealed, key, tokens, webKeys).ConfigureAwait(false).GetAwaiter().GetResult();
-        }
-
-        public Task<Stream> SealAsync(Stream unsealed, params EncryptionToken[] tokens)
-        {
-            return SealAsync(unsealed, null, tokens, null);
-        }
-
-        public Task<Stream> SealAsync(Stream unsealed, params X509Certificate2[] certs)
-        {
-            ITempStreamFactory factory = NewFactory(unsealed);
-            return SealAsync(factory, unsealed, null, certs, null);
-        }
-
-        public Task<Stream> SealAsync(Stream unsealed, params WebKey[] webKeys)
-        {
-            return SealAsync(unsealed, null, null, webKeys);
-        }
-
-        public Task<Stream> SealAsync(Stream unsealed, SecretKey key, params EncryptionToken[] tokens)
-        {
-            return SealAsync(unsealed, key, tokens, null);
-        }
-
-        public Task<Stream> SealAsync(Stream unsealed, SecretKey key, EncryptionToken[] tokens, WebKey[] webKeys)
-        {
-            ITempStreamFactory factory = NewFactory(unsealed);
-            return SealAsync(factory, unsealed, key, tokens == null ? null : ConverToX509Certificates(tokens), webKeys);
-        }
-
-        #endregion
-
-        private ITempStreamFactory NewFactory(Stream stream)
-        {
-            return stream.Length > Settings.Default.InMemorySize ? (ITempStreamFactory)new TempFileStreamFactory() : (ITempStreamFactory)new MemoryStreamFactory(stream.Length);
-        }
-
-        private X509Certificate2[] ConverToX509Certificates(EncryptionToken[] tokens)
-        {
-            X509Certificate2[] certs = new X509Certificate2[tokens.Length];
-            for (int i = 0; i < tokens.Length; i++)
-            {
-                certs[i] = tokens[i].ToCertificate();
-            }
-            return certs;
-        }
-
-        private Task<Stream> SealAsync(ITempStreamFactory factory, Stream unsealedStream, SecretKey skey, X509Certificate2[] certs, WebKey[] webKeys)
-            => OperationPolicy.Default.RunAsync(_ => SealCoreAsync(factory, unsealedStream, skey, certs, webKeys));
-
-        private async Task<Stream> SealCoreAsync(ITempStreamFactory factory, Stream unsealedStream, SecretKey skey, X509Certificate2[] certs, WebKey[] webKeys)
-        {
-            logger?.LogInformation("Sealing message of {0} bytes for {1}/{2} known recipients and {3} unknown recipients to level {4}",
-                unsealedStream.Length, certs?.Length, webKeys?.Length, skey == null ? 0 : 1, this.level);
-
-            using (
-                Stream innerDetached = new MemoryStream(),
-                    innerEmbedded = factory.CreateNew(),
-                    encrypted = factory.CreateNew(),
-                    outerDetached = new MemoryStream()
-            )
-            {
-                //Inner sign
-                if (signature != null)
-                    SignDetached(innerDetached, unsealedStream, signature);
-                else if (ownWebKey != null)
-                    SignDetached(innerDetached, unsealedStream, ownWebKey);
-                else
-                    throw new InvalidOperationException("Tripple wrapper must have either cert of keypair for signing");
-
-                //prepare to merge the detached inner signature with its content
-                innerDetached.Position = 0;
-                unsealedStream.Position = 0;
-
-                //embed the content in the inner signature and add any required info if it uses a different cert.
-                await CompleteAsync(signature == authentication ? (Level?)null : this.level & ~Level.T_Level, innerEmbedded, innerDetached, unsealedStream, signature).ConfigureAwait(false);
-
-                //prepare to encrypt
-                innerEmbedded.Position = 0;
-
-                //Encrypt
-                Encrypt(encrypted, innerEmbedded, certs, skey, webKeys);
-
-                //Loop, since eID doesn't like to be use in very short succession
-                int retry = 0;
-                bool success = false;
-                while (!success)
-                {
-                    //prepare to create the outer signature
-                    encrypted.Position = 0;
-                    outerDetached.SetLength(0);
-
-                    try
-                    {
-                        //Create the outer signature
-                        if (signature != null)
-                            SignDetached(outerDetached, encrypted, authentication);
-                        else
-                            SignDetached(outerDetached, encrypted, ownWebKey);
-                        success = true;
-                    }
-                    catch (CryptographicException ce)
-                    {
-                        if (retry++ < Settings.Default.SignRetries)
-                        {
-                            logger?.LogWarning(ce, "Failed to put outer signature, starting retry {0}", retry);
-                            await Task.Delay((int)Math.Pow(10, retry), OperationScope.Cancellation).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            throw;
-                        }
-                    }
-                }
-
-                //prepare to merge the detached inner signature with its content
-                encrypted.Position = 0;
-                outerDetached.Position = 0;
-
-                //embed the content in the out signature and add any required info
-                Stream result = factory.CreateNew();
-                try
-                {
-                    await CompleteAsync(this.level, result, outerDetached, encrypted, authentication).ConfigureAwait(false);
-
-                    //prepare to return the triple wrapped message
-                    result.Position = 0;
-
-                    //return the triple wrapped message
-                    return result;
-                }
-                catch { result.Dispose(); throw; }
-            }
-        }
-
-        private Signer GetSigner(X509Certificate2 selectedCert)
-        {
-            return signers.GetOrAdd(selectedCert, cert => new Lazy<Signer>(() => CreateSigner(cert))).Value;
-        }
-
-        private Signer CreateSigner(X509Certificate2 selectedCert)
-        {
-            var signer = new Signer { Certificate = DotNetUtilities.FromX509Certificate(selectedCert) };
-
-            SignatureAlgorithm signAlgo;
-            AsymmetricAlgorithm key = (AsymmetricAlgorithm)selectedCert.GetECDsaPrivateKey() ?? selectedCert.GetRSAPrivateKey();
-            if (key is RSA rsaKey)
-            {
-                if (useNativeRsaPss)
-                {
-                    signer.SignatureFactory = new NativeRsaPssSignatureFactory(rsaKey);
-                    signer.OwnedKey = rsaKey;
-                    return signer;
-                }
-                try
-                {
-                    signAlgo = EteeActiveConfig.Seal.NativeSignatureAlgorithm;
-                    BC::Crypto.AsymmetricCipherKeyPair keyPair = DotNetUtilities.GetRsaKeyPair(rsaKey);
-                    signer.SignatureFactory = new Asn1SignatureFactory(signAlgo.Algorithm.FriendlyName, keyPair.Private);
-                    key.Dispose();
-                }
-                catch (CryptographicException e)
-                {
-                    logger?.LogDebug(0, e, "Failed to export key");
-                    signAlgo = EteeActiveConfig.Seal.WindowsSignatureAlgorithm;
-                    signer.SignatureFactory = new WinSignatureFactory(signAlgo.Algorithm, signAlgo.DigestAlgorithm, key);
-                    signer.OwnedKey = key;
-                }
-            }
-            if (key is ECDsa ecdsaKey)
-            {
-                signAlgo = EteeActiveConfig.Seal.ECSignatureAlgorithm;
-                signer.SignatureFactory = new WinSignatureFactory(signAlgo.Algorithm, signAlgo.DigestAlgorithm, ecdsaKey);
-                signer.OwnedKey = key;
-            }
-            return signer;
-        }
-
+        private SignedCms Sign(byte[] data, X509Certificate2 certificate)
+            => certificate != null ? NativeCms.Sign(data, certificate, Key(certificate)) : NativeCms.Sign(data, null, ownWebKey.NativeKey, ownWebKey.Id);
         protected void SignDetached(Stream signed, Stream unsigned, X509Certificate2 selectedCert)
         {
-            logger?.LogInformation("Signing the message in name of {0}", selectedCert.Subject);
-            Signer signer = GetSigner(selectedCert);
-
-            SignerInfoGenerator sigInfoGen = new SignerInfoGeneratorBuilder()
-                .Build(signer.SignatureFactory, signer.Certificate);
-
-            CmsSignedDataGenerator cmsSignedDataGen = new CmsSignedDataGenerator();
-            cmsSignedDataGen.AddSignerInfoGenerator(sigInfoGen);
-
-            CmsSignedData detachedSignature = cmsSignedDataGen.Generate(new CmsProcessableProxy(unsigned), false);
-
-            byte[] detachedSignatureBytes = detachedSignature.GetEncoded();
-            signed.Write(detachedSignatureBytes, 0, detachedSignatureBytes.Length);
+            var cms = new SignedCms(new ContentInfo(NativeCms.Read(unsigned)), true);
+            var key = Key(selectedCert);
+            var signer = new CmsSigner(selectedCert) { PrivateKey = key, DigestAlgorithm = new Oid(CryptoEncoding.Sha256), IncludeOption = X509IncludeOption.None };
+            if (key is RSA) signer.SignaturePadding = RSASignaturePadding.Pss;
+            signer.SignedAttributes.Add(new Pkcs9SigningTime(DateTime.UtcNow));
+            lock (key) cms.ComputeSignature(signer, true);
+            byte[] bytes = cms.Encode(); signed.Write(bytes, 0, bytes.Length);
         }
-
-        protected void SignDetached(Stream signed, Stream unsigned, WebKey webKey)
+        public Stream Complete(Stream data) => CompleteAsync(data).GetAwaiter().GetResult();
+        public Stream Complete(Stream data, out TimemarkKey key)
+        { var result = CompleteWithKeyAsync(data).GetAwaiter().GetResult(); key = result.TimemarkKey; return result.Value; }
+        public async Task<Stream> CompleteAsync(Stream data) => (await CompleteWithKeyAsync(data).ConfigureAwait(false)).Value;
+        Task<TimemarkedResult<Stream>> ITmaDataCompleter.CompleteAsync(Stream data) => CompleteWithKeyAsync(data);
+        private Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream data) => OperationPolicy.Default.RunAsync(async _ =>
         {
-            var keyId = webKey.Id;
-            logger?.LogInformation("Signing the message in name of {0}", Convert.ToBase64String(keyId));
-
-            SignatureAlgorithm signAlgo = EteeActiveConfig.Seal.NativeSignatureAlgorithm;
-            ISignatureFactory sigFactory = useNativeRsaPss && webKey.NativeKey is RSA rsa
-                ? (ISignatureFactory)new NativeRsaPssSignatureFactory(rsa)
-                : new Asn1SignatureFactory(signAlgo.Algorithm.FriendlyName, webKey.BCKeyPair.Private);
-
-            SignerInfoGenerator sigInfoGen = new SignerInfoGeneratorBuilder()
-                .Build(sigFactory, keyId);
-
-            CmsSignedDataGenerator cmsSignedDataGen = new CmsSignedDataGenerator();
-            cmsSignedDataGen.AddSignerInfoGenerator(sigInfoGen);
-
-            CmsSignedData detachedSignature = cmsSignedDataGen.Generate(new CmsProcessableProxy(unsigned), false);
-
-            byte[] detachedSignatureBytes = detachedSignature.GetEncoded();
-            signed.Write(detachedSignatureBytes, 0, detachedSignatureBytes.Length);
-        }
-
-        protected void Encrypt(Stream cipher, Stream clear, ICollection<X509Certificate2> certs, SecretKey key, WebKey[] webKeys)
+            var cms = NativeCms.Decode(NativeCms.Read(data));
+            var key = await CompleteCoreAsync(cms, null, level).ConfigureAwait(false);
+            return new TimemarkedResult<Stream>(ToStream(cms.Encode()), key);
+        });
+        private async Task<TimemarkKey> CompleteCoreAsync(SignedCms cms, X509Certificate2 provided, Level? requested)
         {
-            logger?.LogInformation("Encrypting message for {0} known and {1} unknown recipient",
-                certs == null ? 0 : certs.Count, key == null ? 0 : 1);
-            CmsEnvelopedDataStreamGenerator encryptGenerator = new CmsEnvelopedDataStreamGenerator();
-            encryptGenerator.SetBufferSize(StreamBufferSize);
-            if (certs != null)
+            var signer = NativeCms.SingleSigner(cms);
+            var certificate = NativeCms.FindSigner(cms) ?? provided;
+            var key = new TimemarkKey { Signer = certificate, SignerId = certificate != null ? CryptoEncoding.SubjectKeyIdentifier(certificate) : NativeCms.KeyId(signer), SigningTime = NativeCms.SigningTime(signer) ?? default, SignatureValue = signer.GetSignature() };
+            if (key.SignerId == null) throw new InvalidMessageException("Missing signer identity");
+            byte[] embeddedTimestamp = NativeCms.Attribute(signer.UnsignedAttributes, CryptoEncoding.TimestampAttribute);
+            var timestamp = embeddedTimestamp?.ToTimeStampToken();
+            if (key.SigningTime == default && timestamp != null) key.SigningTime = timestamp.TokenInfo.Timestamp.UtcDateTime;
+            if (requested != null && certificate != null && cms.Certificates.Count <= 1)
             {
-                foreach (X509Certificate2 cert in certs)
+                var chain = certificate.BuildChain(key.SigningTime == default ? DateTime.UtcNow : key.SigningTime, extraStore);
+                if (chain.ChainStatus.Any(status => status.Status != X509ChainStatusFlags.NoError)) throw new InvalidMessageException("Signer certificate chain failed validation");
+                foreach (var element in chain.ChainElements)
                 {
-                    BC::X509.X509Certificate bcCert = DotNetUtilities.FromX509Certificate(cert);
-                    encryptGenerator.AddKeyTransRecipient(bcCert);
-                    logger?.LogDebug("Added known recipient: {0} ({1})", bcCert.SubjectDN, bcCert.IssuerDN);
+                    if (!cms.Certificates.Contains(element.Certificate)) cms.AddCertificate(element.Certificate);
+                    element.Certificate.Dispose();
                 }
+                signer = NativeCms.SingleSigner(cms);
             }
-            if (key != null)
+            if (timestamp == null && (requested & Level.T_Level) == Level.T_Level && timestampProvider != null)
             {
-                encryptGenerator.AddKekRecipient("AES", key.BCKey, key.Id);
-                logger?.LogDebug("Added unknown recipient [Algorithm={0}, keyId={1}]", "AES", key.IdString);
+                byte[] hash = SHA256.HashData(key.SignatureValue);
+                byte[] bytes = timestampProvider is ITimestampProviderAsync asyncProvider
+                    ? await asyncProvider.GetTimestampFromDocumentHashAsync(hash, "http://www.w3.org/2001/04/xmlenc#sha256").ConfigureAwait(false)
+                    : timestampProvider.GetTimestampFromDocumentHash(hash, "http://www.w3.org/2001/04/xmlenc#sha256");
+                timestamp = bytes.ToTimeStampToken();
+                if (!timestamp.IsMatch(new MemoryStream(key.SignatureValue, false))) throw new InvalidMessageException("Timestamp does not match the signature");
+                NativeCms.SetUnsigned(signer, CryptoEncoding.TimestampAttribute, bytes);
             }
-            if (webKeys != null)
+            if ((requested & Level.L_Level) == Level.L_Level)
             {
-                foreach (WebKey webKey in webKeys)
+                var evidence = NativeCms.RevocationValues(signer);
+                if (certificate != null)
                 {
-                    encryptGenerator.AddKeyTransRecipient(webKey.BCPublicKey, webKey.Id);
-                    logger?.LogDebug("Added web recipient [Algorithm={0}, keyId={1}]", "RSA", webKey.IdString);
+                    var chain = await certificate.BuildChainAsync(key.SigningTime, cms.Certificates, evidence.Crls, evidence.Ocsps).ConfigureAwait(false);
+                    if (chain.ChainStatus.Any(status => status.Status != X509ChainStatusFlags.NoError)) throw new InvalidMessageException("Signer revocation validation failed");
+                    foreach (var element in chain.ChainElements) element.Certificate.Dispose();
                 }
-            }
-
-            Stream encryptingStream = encryptGenerator.Open(cipher, EteeActiveConfig.Seal.EncryptionAlgorithm.Value);
-            logger?.LogDebug("Create encrypted message (still empty) [EncAlgo={0} ({1})]",
-                EteeActiveConfig.Seal.EncryptionAlgorithm.FriendlyName, EteeActiveConfig.Seal.EncryptionAlgorithm.Value);
-            try
-            {
-                OperationScope.Copy(clear, encryptingStream);
-                logger?.LogDebug("Message encrypted");
-            }
-            finally
-            {
-                encryptingStream.Close();
-                logger?.LogDebug("Recipient infos added");
-            }
-        }
-
-        protected async Task<TimemarkKey> CompleteAsync(Level? level, Stream embedded, Stream signed, Stream content, X509Certificate2 providedSigner)
-        {
-            logger?.LogInformation("Completing the message with of {0} bytes to level {1}", signed.Length, level);
-
-            //Create the objects we need
-            var gen = new CmsSignedDataStreamGenerator();
-            gen.SetBufferSize(StreamBufferSize);
-            var parser = new CmsSignedDataParser(signed);
-            var timemarkKey = new TimemarkKey();
-
-            //preset the digests so we can add the signers afterwards
-            gen.AddDigests(parser.DigestOids);
-
-            //Copy the content to the output
-            Stream contentOut = gen.Open(embedded, parser.SignedContentType.Id, true);
-            if (content != null)
-                OperationScope.Copy(content, contentOut);
-            else
-                OperationScope.Copy(parser.GetSignedContent().ContentStream, contentOut);
-
-            //Extract the various data from outer layer
-            SignerInformation signerInfo = ExtractSignerInfo(parser);
-            IStore<BC::X509.X509Certificate> embeddedCerts = parser.GetCertificates();
-
-            //Extract the various data from signer info
-            timemarkKey.SignatureValue = signerInfo.GetSignature();
-            timemarkKey.SigningTime = ExtractSigningTime(signerInfo);
-            timemarkKey.Signer = ExtractSignerCert(embeddedCerts, signerInfo, providedSigner);
-            if (timemarkKey.Signer != null)
-                timemarkKey.SignerId = DotNetUtilities.FromX509Certificate(timemarkKey.Signer).GetSubjectKeyIdentifier();
-            else
-                timemarkKey.SignerId = signerInfo.SignerID.ExtractSignerId();
-
-            //Extract the various data from unsiged attributes of signer info
-            IDictionary<DerObjectIdentifier, object> unsignedAttributes = signerInfo.UnsignedAttributes != null ? signerInfo.UnsignedAttributes.ToDictionary() : new Dictionary<DerObjectIdentifier, object>();
-            TimeStampToken tst = ExtractTimestamp(unsignedAttributes);
-            RevocationValues revocationInfo = ExtractRevocationInfo(unsignedAttributes);
-
-            //quick check for an expected error and extrapolate some info
-            if (timemarkKey.SignerId == null)
-            {
-                logger?.LogError("We could not find any signer information");
-                throw new InvalidMessageException("The message does not contain any valid signer info");
-            }
-
-            if (timemarkKey.SigningTime == default && tst != null)
-            {
-                logger?.LogInformation("Implicit signing time is replaced with time-stamp time {0}", tst.TimeStampInfo.GenTime);
-                timemarkKey.SigningTime = tst.TimeStampInfo.GenTime;
-            }
-
-            //Are we missing embedded certs and should we add them?
-            if ((embeddedCerts == null || embeddedCerts.EnumerateMatches(null).Count() <= 1)
-                && timemarkKey.Signer != null
-                && level != null)
-            {
-                embeddedCerts = GetEmbeddedCerts(timemarkKey);
-            }
-            if (embeddedCerts != null) gen.AddCertificates(embeddedCerts); //add the existing or new embedded certs to the output.
-
-
-            //Are we missing timestamp and should we add them (not that time-mark authorities do not require a timestamp provider)
-            if (tst == null
-                && (level & Level.T_Level) == Level.T_Level && timestampProvider != null)
-            {
-                tst = await GetTimestampAsync(timemarkKey).ConfigureAwait(false);
-                AddTimestamp(unsignedAttributes, tst);
-            }
-
-            //should be make sure we have the proper revocation info (it is hard to tell if we have everything, just go for it)
-            if ((level & Level.L_Level) == Level.L_Level)
-            {
-                if (embeddedCerts != null && embeddedCerts.EnumerateMatches(null).Any())
+                if (timestamp != null)
                 {
-                    //extend the revocation info with info about the embedded certs
-                    revocationInfo = await GetRevocationValuesAsync(timemarkKey, embeddedCerts, revocationInfo).ConfigureAwait(false);
+                    var validation = await timestamp.ValidateAsync(evidence.Crls, evidence.Ocsps).ConfigureAwait(false);
+                    if (validation.TimestampStatus.Any(status => status.Status != X509ChainStatusFlags.NoError)) throw new InvalidMessageException("Timestamp validation failed");
                 }
-                if (tst != null)
-                {
-                    //extend the revocation info with info about the TST
-                    revocationInfo = await GetRevocationValuesAsync(tst, revocationInfo).ConfigureAwait(false);
-                }
-                //update the unsigned attributes
-                AddRevocationValues(unsignedAttributes, revocationInfo);
+                NativeCms.SetUnsigned(signer, CryptoEncoding.RevocationAttribute, NativeCms.EncodeRevocationValues(evidence.Crls, evidence.Ocsps));
             }
-
-            //Update the unsigned attributes of the signer info
-            signerInfo = SignerInformation.ReplaceUnsignedAttributes(signerInfo, new BC::Asn1.Cms.AttributeTable(unsignedAttributes));
-
-            //Copy the signer
-            gen.AddSigners(new SignerInformationStore(new SignerInformation[] { signerInfo }));
-
-            contentOut.Close();
-            return timemarkKey;
+            return key;
         }
-
-        private SignerInformation ExtractSignerInfo(CmsSignedDataParser parser)
+        private static Stream ToStream(byte[] value)
         {
-            //Extract the signer info
-            SignerInformationStore signerInfoStore = parser.GetSignerInfos();
-            if (signerInfoStore.Count != 1)
-            {
-                logger?.LogError("The message to complete does not contain a single signature");
-                throw new InvalidMessageException("The message does not contain a single signature");
-            }
-
-            return signerInfoStore.GetSigners().Cast<SignerInformation>().First();
-        }
-
-        private DateTime ExtractSigningTime(SignerInformation signerInfo)
-        {
-            BC::Asn1.Cms.Attribute singingTimeAttr = signerInfo.SignedAttributes?[CmsAttributes.SigningTime];
-            if (singingTimeAttr != null)
-            {
-                DateTime date = Org.BouncyCastle.Asn1.Cms.Time.GetInstance(singingTimeAttr.AttrValues[0]).ToDateTime();
-                if (date.Kind == DateTimeKind.Unspecified)
-                {
-                    return new DateTime(date.Ticks, DateTimeKind.Utc);
-                }
-                else
-                {
-                    return date.ToUniversalTime();
-                }
-            }
-            else
-            {
-                logger?.LogWarning("The message to complete does not contain a signing time");
-                return default;
-            }
-        }
-
-        private X509Certificate2 ExtractSignerCert(IStore<BC::X509.X509Certificate> embeddedCerts, SignerInformation signerInfo, X509Certificate2 provided)
-        {
-            //Extract the signer, if available
-            if (embeddedCerts != null && embeddedCerts.EnumerateMatches(null).Any())
-            {
-                IEnumerator<BC::X509.X509Certificate> signerCerts = embeddedCerts.EnumerateMatches(signerInfo.SignerID).GetEnumerator();
-                if (!signerCerts.MoveNext())
-                {
-                    logger?.LogError("The message does contains certificates, but the signing certificate is missing");
-                    throw new InvalidMessageException("The message does not contain the signer certificate");
-                }
-                var signer = new X509Certificate2((signerCerts.Current).GetEncoded());
-                logger?.LogDebug("The message contains certificates, of which {0} is the signer", signer.Subject);
-                //maybe (one day) check if the found signer corresponds to the provided signer)
-                return signer;
-            }
-            else
-            {
-                logger?.LogDebug("The message does not contains certificates, adding the provided {0}", provided?.Subject);
-                return provided;
-            }
-        }
-
-
-
-        private TimeStampToken ExtractTimestamp(IDictionary<DerObjectIdentifier, object> unsignedAttributes)
-        {
-            TimeStampToken tst = null;
-
-            if (unsignedAttributes.ContainsKey(PkcsObjectIdentifiers.IdAASignatureTimeStampToken))
-            {
-                BC::Asn1.Cms.Attribute timestampAttr = (BC::Asn1.Cms.Attribute)unsignedAttributes[PkcsObjectIdentifiers.IdAASignatureTimeStampToken];
-                if (((DerSet)timestampAttr.AttrValues).Count > 0)
-                {
-                    DerSet rawTsts = (DerSet)timestampAttr.AttrValues;
-                    if (rawTsts.Count > 1)
-                    {
-                        logger?.LogError("There are {0} signature timestamps present", rawTsts.Count);
-                        throw new NotSupportedException("The library does not support more then one time-stamp");
-                    }
-
-                    tst = rawTsts[0].GetEncoded().ToTimeStampToken();
-                }
-            }
-            return tst;
-        }
-
-        private RevocationValues ExtractRevocationInfo(IDictionary<DerObjectIdentifier, object> unsignedAttributes)
-        {
-            if (unsignedAttributes.ContainsKey(PkcsObjectIdentifiers.IdAAEtsRevocationValues))
-            {
-                BC::Asn1.Cms.Attribute revocationAttr = (BC::Asn1.Cms.Attribute)unsignedAttributes[PkcsObjectIdentifiers.IdAAEtsRevocationValues];
-                DerSet revocationInfoSet = (DerSet)revocationAttr.AttrValues;
-                if (revocationInfoSet == null || revocationInfoSet.Count == 0)
-                {
-                    return RevocationValues.GetInstance(revocationInfoSet[0]);
-                }
-            }
-            return new RevocationValues(new CertificateList[0], new BasicOcspResponse[0], null);
-        }
-
-        private IStore<BC::X509.X509Certificate> GetEmbeddedCerts(TimemarkKey timemarkKey)
-        {
-            //Construct the chain of certificates
-            Chain chain = timemarkKey.Signer.BuildChain(timemarkKey.SigningTime == default ? DateTime.UtcNow : timemarkKey.SigningTime, extraStore);
-            if (chain.ChainStatus.Any(x => x.Status != X509ChainStatusFlags.NoError))
-            {
-                logger?.LogError("The certification chain of {0} failed with errors", chain.ChainElements[0].Certificate.Subject);
-                throw new InvalidMessageException(string.Format("The certificate chain of the signer {0} fails basic validation", timemarkKey.Signer.Subject));
-            }
-
-            List<BC::X509.X509Certificate> senderChainCollection = new List<BC::X509.X509Certificate>();
-            foreach (ChainElement ce in chain.ChainElements)
-            {
-                logger?.LogDebug("Adding the certificate {0} to the message", ce.Certificate.Subject);
-                senderChainCollection.Add(DotNetUtilities.FromX509Certificate(ce.Certificate));
-            }
-            return CollectionUtilities.CreateStore(senderChainCollection);
-        }
-
-        private void AddEmbeddedCerts(CmsSignedDataStreamGenerator gen, IStore<BC::X509.X509Certificate> embeddedCerts)
-        {
-            if (embeddedCerts != null) gen.AddCertificates(embeddedCerts);
-        }
-
-        private async Task<TimeStampToken> GetTimestampAsync(TimemarkKey timemarkKey)
-        {
-            byte[] signatureHash;
-            using (SHA256 sha = SHA256.Create())
-            {
-                signatureHash = sha.ComputeHash(timemarkKey.SignatureValue);
-            }
-            if (logger?.IsEnabled(LogLevel.Debug) == true)
-                logger.LogDebug("SHA-256 hashed the signature value from {0} to {1}", Convert.ToBase64String(timemarkKey.SignatureValue), Convert.ToBase64String(signatureHash));
-
-            const string digestMethod = "http://www.w3.org/2001/04/xmlenc#sha256";
-            byte[] rawTst = timestampProvider is ITimestampProviderAsync asyncProvider
-                ? await asyncProvider.GetTimestampFromDocumentHashAsync(signatureHash, digestMethod).ConfigureAwait(false)
-                : timestampProvider.GetTimestampFromDocumentHash(signatureHash, digestMethod);
-            TimeStampToken tst = rawTst.ToTimeStampToken();
-
-            //basic check
-            if (!tst.IsMatch(new MemoryStream(timemarkKey.SignatureValue)))
-            {
-                logger?.LogError("The time-stamp does not correspond to the signature value {0}", Convert.ToBase64String(timemarkKey.SignatureValue));
-                throw new InvalidOperationException("The time-stamp authority did not return a matching time-stamp");
-            }
-
-            //Don't verify the time-stamp, it is done later
-            return tst;
-        }
-
-        private void AddTimestamp(IDictionary<DerObjectIdentifier, object> unsignedAttributes, TimeStampToken tst)
-        {
-            byte[] rawTst = tst.GetEncoded();
-            BC.Asn1.Cms.Attribute signatureTstAttr = new BC::Asn1.Cms.Attribute(PkcsObjectIdentifiers.IdAASignatureTimeStampToken, new DerSet(Asn1Object.FromByteArray(rawTst)));
-            unsignedAttributes[signatureTstAttr.AttrType] = signatureTstAttr;
-            if (logger?.IsEnabled(LogLevel.Debug) == true)
-                logger.LogDebug("Added the time-stamp {0} [Token={1}]", tst.TimeStampInfo.GenTime, Convert.ToBase64String(rawTst));
-        }
-
-        private async Task<RevocationValues> GetRevocationValuesAsync(TimemarkKey timemarkKey, IStore<BC::X509.X509Certificate> embeddedCerts, RevocationValues revocationInfo)
-        {
-            IList<CertificateList> crls = new List<CertificateList>(revocationInfo.GetCrlVals());
-            IList<BasicOcspResponse> ocsps = new List<BasicOcspResponse>(revocationInfo.GetOcspVals());
-            logger?.LogDebug("Start getting revocation values for Cert, having {0} OCSP's and {1} CRL's", ocsps.Count, crls.Count);
-
-            var chainExtraStore = new X509Certificate2Collection();
-            foreach (Org.BouncyCastle.X509.X509Certificate cert in embeddedCerts.EnumerateMatches(null))
-            {
-                chainExtraStore.Add(new X509Certificate2(cert.GetEncoded()));
-            }
-            Chain chain = await timemarkKey.Signer.BuildChainAsync(timemarkKey.SigningTime, chainExtraStore, crls, ocsps).ConfigureAwait(false);
-            X509CertificateHelper.DisposeAll(chainExtraStore);
-            if (chain.ChainStatus.Any(x => x.Status != X509ChainStatusFlags.NoError))
-            {
-                logger?.LogError("The certificate chain of the signer {0} failed with {1} issues: {2}, {3}", timemarkKey.Signer.Subject,
-                    chain.ChainStatus.Count, chain.ChainStatus[0].Status, chain.ChainStatus[0].StatusInformation);
-                throw new InvalidMessageException(string.Format("The certificate chain of the signer {0} fails revocation validation", timemarkKey.Signer.Subject));
-            }
-            logger?.LogDebug("Finished getting revocation values for Cert, now having {0} OCSP's and {1} CRL's", ocsps.Count, crls.Count);
-            return new RevocationValues(crls, ocsps, null);
-        }
-
-        private async Task<RevocationValues> GetRevocationValuesAsync(TimeStampToken tst, RevocationValues revocationInfo)
-        {
-            IList<CertificateList> crls = new List<CertificateList>(revocationInfo.GetCrlVals());
-            IList<BasicOcspResponse> ocsps = new List<BasicOcspResponse>(revocationInfo.GetOcspVals());
-            logger?.LogDebug("Start getting revocation values for TST, having {0} OCSP's and {1} CRL's", ocsps.Count, crls.Count);
-
-            Timestamp ts = await tst.ValidateAsync(crls, ocsps).ConfigureAwait(false);
-            if (ts.TimestampStatus.Any(x => x.Status != X509ChainStatusFlags.NoError))
-            {
-                logger?.LogError("The certificate chain of the time-stamp signer {0} failed with {1} issues: {2}, {3}", ts.CertificateChain.ChainElements[0].Certificate.Subject,
-                ts.TimestampStatus.Count, ts.TimestampStatus[0].Status, ts.TimestampStatus[0].StatusInformation);
-                throw new InvalidMessageException("The embedded time-stamp fails validation");
-            }
-            logger?.LogDebug("Finished getting revocation values for TST, now having {0} OCSP's and {1} CRL's", ocsps.Count, crls.Count);
-            return new RevocationValues(crls, ocsps, null);
-        }
-
-        private void AddRevocationValues(IDictionary<DerObjectIdentifier, object> unsignedAttributes, RevocationValues revocationInfo)
-        {
-            BC::Asn1.Cms.Attribute revocationAttr = new BC::Asn1.Cms.Attribute(PkcsObjectIdentifiers.IdAAEtsRevocationValues, new DerSet(revocationInfo.ToAsn1Object()));
-            unsignedAttributes[revocationAttr.AttrType] = revocationAttr;
-            logger?.LogDebug("Added OCSP's and CRL's to the message");
+            OperationScope.Cancellation.ThrowIfCancellationRequested();
+            if (value.Length <= Settings.Default.InMemorySize) return new MemoryStream(value, false);
+            var stream = new TempFileStreamFactory().CreateNew();
+            try { using var input = new MemoryStream(value, false); OperationScope.Copy(input, stream); stream.Position = 0; return stream; }
+            catch { stream.Dispose(); throw; }
         }
     }
 }
-

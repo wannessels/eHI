@@ -1,4 +1,4 @@
-﻿/*
+/*
  * This file is part of .Net ETEE for eHealth.
  * Copyright (C) 2014 Egelke
  * 
@@ -22,8 +22,6 @@ using System.Collections.Generic;
 using System.Text;
 using System.Security.Cryptography.X509Certificates;
 using Egelke.EHealth.Client.Pki;
-using Org.BouncyCastle.Security;
-using BC = Org.BouncyCastle;
 using System.Security.Cryptography;
 
 using Microsoft.Extensions.Logging;

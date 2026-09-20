@@ -1,4 +1,4 @@
-﻿/*
+/*
  * This file is part of .Net ETEE for eHealth.
  * Copyright (C) 2014-2020 Egelke
  * 
@@ -18,13 +18,7 @@
 
 using System;
 using System.Security.Cryptography;
-using Org.BouncyCastle.Crypto.Parameters;
 using Egelke.EHealth.Etee.Crypto.Utils;
-using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Utilities.Encoders;
-using Org.BouncyCastle.Security;
-using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.X509.Extension;
 
 namespace Egelke.EHealth.Etee.Crypto
 {
@@ -33,30 +27,13 @@ namespace Egelke.EHealth.Etee.Crypto
     /// </summary>
     public class WebKey
     {
-        private static AsymmetricKeyParameter ToBCPublicKey(AsymmetricAlgorithm key)
-        {
-            if (key is DSA)
-            {
-                return DotNetUtilities.GetDsaPublicKey((DSA)key);
-            }
-
-            if (key is RSA)
-            {
-                return DotNetUtilities.GetRsaPublicKey((RSA)key);
-            }
-
-            throw new ArgumentException("Unsupported algorithm specified", "privateKey");
-        }
-
         private readonly AsymmetricAlgorithm key;
-        private readonly Lazy<AsymmetricCipherKeyPair> bcKeyPair;
-        private readonly Lazy<AsymmetricKeyParameter> bcPublicKey;
 
         /// <summary>
         /// Constructor for the Object representation of the WebKey.
         /// </summary>
         public WebKey(AsymmetricAlgorithm key)
-            : this(new SubjectKeyIdentifierStructure(ToBCPublicKey(key)).GetKeyIdentifier(), key)
+            : this(CalculateId(key), key)
         {
         }
 
@@ -82,8 +59,6 @@ namespace Egelke.EHealth.Etee.Crypto
         {
             this.Id = id;
             this.key = key;
-            bcKeyPair = new Lazy<AsymmetricCipherKeyPair>(() => DotNetUtilities.GetKeyPair(key));
-            bcPublicKey = new Lazy<AsymmetricKeyParameter>(() => ToBCPublicKey(key));
         }
 
 
@@ -118,11 +93,16 @@ namespace Egelke.EHealth.Etee.Crypto
         public String IdString => Convert.ToBase64String(Id);
 
 
-        internal AsymmetricCipherKeyPair BCKeyPair => bcKeyPair.Value;
+        private static byte[] CalculateId(AsymmetricAlgorithm key)
+        {
+            var spki = Egelke.EHealth.Client.Pki.CryptoEncoding.Sequence(key.ExportSubjectPublicKeyInfo());
+            spki.ReadEncodedValue(); var bits = spki.ReadBitString(out int unused); spki.ThrowIfNotEmpty();
+            if (unused != 0) throw new CryptographicException("Invalid public key encoding");
+            return SHA1.HashData(bits);
+        }
         internal AsymmetricAlgorithm NativeKey => key;
 
 
-        internal AsymmetricKeyParameter BCPublicKey => bcPublicKey.Value;
 
 
     }

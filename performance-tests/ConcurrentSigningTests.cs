@@ -1,36 +1,36 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using Egelke.EHealth.Etee.Crypto;
-using Org.BouncyCastle.Crypto;
+using Egelke.EHealth.Etee.Crypto.Receiver;
+using Egelke.EHealth.Etee.Crypto.Sender;
+using Egelke.EHealth.Etee.Crypto.Status;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 public class ConcurrentSigningTests
 {
     [Fact]
-    public async Task CachedNativeFactorySignsIndependentConcurrentMessages()
+    public async Task NativeEcdsaSignsIndependentConcurrentMessages()
     {
-        using (var key = ECDsa.Create(ECCurve.NamedCurves.nistP256))
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256); var sender = new WebKey(key);
+        var recipient = new SecretKey(new byte[] { 1 }, RandomNumberGenerator.GetBytes(16));
+        var sealer = new DataSealerFactory(NullLoggerFactory.Instance).Create(Level.B_Level, sender);
+        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance).Create(null, new X509Certificate2Collection(), new X509Certificate2Collection(), Array.Empty<WebKey>());
+        try
         {
-            var factoryType = typeof(WebKey).Assembly.GetType("Egelke.EHealth.Etee.Crypto.Utils.WinSignatureFactory");
-            var factory = (ISignatureFactory)Activator.CreateInstance(factoryType,
-                new Oid("1.2.840.10045.4.3.2"), new Oid("2.16.840.1.101.3.4.2.1", "SHA256"), key);
-            var publicKey = key.ExportSubjectPublicKeyInfo();
-            await Task.WhenAll(Enumerable.Range(0, 64).Select(i => Task.Run(() =>
+            await Task.WhenAll(Enumerable.Range(0, 32).Select(i => Task.Run(async () =>
             {
                 byte[] data = BitConverter.GetBytes(i);
-                var calculator = factory.CreateCalculator();
-                using (var stream = calculator.Stream) stream.Write(data, 0, data.Length);
-                var result = calculator.GetResult();
-                byte[] signature = result.Collect();
-                Assert.Equal(signature, result.Collect());
-                using (var verifier = ECDsa.Create())
-                {
-                    verifier.ImportSubjectPublicKeyInfo(publicKey, out _);
-                    Assert.True(verifier.VerifyData(data, signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence));
-                }
+                using var input = new MemoryStream(data); using var encrypted = await sealer.SealAsync(input, recipient, Array.Empty<EncryptionToken>());
+                var result = await receiver.UnsealAsync(encrypted, sender, recipient);
+                using (result.UnsealedData) using (var output = new MemoryStream())
+                { result.UnsealedData.CopyTo(output); Assert.Equal(data, output.ToArray()); Assert.Equal(ValidationStatus.Valid, result.SecurityInformation.ValidationStatus); }
             })));
         }
+        finally { (sealer as IDisposable)?.Dispose(); (receiver as IDisposable)?.Dispose(); }
     }
 }

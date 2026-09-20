@@ -13,6 +13,8 @@ using Org.BouncyCastle.Crypto.Operators;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Ocsp;
 using Xunit;
+using CertificateList = Egelke.EHealth.Client.Pki.CertificateRevocationList;
+using BasicOcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
 
 [CollectionDefinition("Revocation", DisableParallelization = true)]
 public class RevocationCollection { }
@@ -60,7 +62,7 @@ public class RevocationTests : IDisposable
                 var gen = new BasicOcspRespGenerator(key.Public);
                 gen.AddResponse(new CertificateID(new AlgorithmIdentifier(OiwObjectIdentifiers.IdSha1), root, leaf.SerialNumber), CertificateStatus.Good, DateTime.UtcNow.AddMinutes(-1), DateTime.UtcNow.AddHours(1), null);
                 var bad = gen.Generate(new Asn1SignatureFactory("SHA256WITHRSA", PkiFixture.NewKey().Private), new[] { root }, DateTime.UtcNow);
-                server.Ocsp = new OcspResponse(new OcspResponseStatus(0), new ResponseBytes(OcspObjectIdentifiers.PkixOcspBasic, new DerOctetString(bad.GetEncoded()))).GetEncoded();
+                server.Ocsp = new Org.BouncyCastle.Asn1.Ocsp.OcspResponse(new OcspResponseStatus(0), new ResponseBytes(OcspObjectIdentifiers.PkixOcspBasic, new DerOctetString(bad.GetEncoded()))).GetEncoded();
                 server.Crl = PkiFixture.MakeCrl(root, key, revoked: leaf.SerialNumber).GetEncoded();
                 var chain = await cert.BuildChainAsync(DateTime.UtcNow, new X509Certificate2Collection(issuer), new List<CertificateList>(), new List<BasicOcspResponse>());
                 Assert.Contains(chain.ChainStatus, s => s.Status == X509ChainStatusFlags.Revoked);

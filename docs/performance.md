@@ -1,17 +1,10 @@
 # Performance configuration
 
-## Native RSA-PSS feature flag
+## Native cryptography
 
-```csharp
-Egelke.EHealth.Etee.Crypto.Configuration.Settings.Default.UseNativeRsaPss = true;
-```
+The libraries target .NET 8 and always use platform cryptography. BouncyCastle is no longer a production dependency. The old `UseNativeRsaPss` flag is obsolete; enabling it is unnecessary and disabling it is unsupported. See the [migration guide](native-crypto-migration.md) for public PKI type changes, supported profiles and memory behavior.
 
-The default is `false`. Enable at startup to use platform `RSA.SignHash` for certificate and WebKey RSA signing. CMS encoding remains in BouncyCastle; signatures use the existing RSA-PSS parameters (SHA-256, MGF1/SHA-256, 32-byte salt, trailer field 1). Each sealer captures the flag on creation; service clients retire their cached sealer when the flag changes. Directly held sealers must be recreated after a change.
-
-Native RSA key providers must support PSS. Unsupported providers fail rather than silently switching the signature algorithm. Disable the flag to restore the existing BouncyCastle path. ECDSA behavior is unchanged, native keys are synchronized during signing, and caller-owned WebKey/certificate objects remain owned by the caller.
-
-Factory-created sealers own cached native handles. For a directly held sealer, call `(sealer as IDisposable)?.Dispose()` after its active operations finish. Service clients retire and dispose their owned sealers automatically.
-
+Dispose directly held factory-created sealers/unsealers after active operations finish, using `(instance as IDisposable)?.Dispose()`. Service clients retire and dispose their owned contexts automatically. Caller-owned certificates, stores and WebKeys must outlive active operations.
 ## Admission, cancellation and caching
 
 Use one shared policy for clients belonging to the same application capacity budget:

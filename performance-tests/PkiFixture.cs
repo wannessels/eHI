@@ -24,24 +24,25 @@ using BCert = Org.BouncyCastle.X509.X509Certificate;
 internal class PkiFixture
 {
     internal static AsymmetricCipherKeyPair NewKey() { using var rsa = RSA.Create(2048); return DotNetUtilities.GetRsaKeyPair(rsa); }
-    internal static BCert MakeCert(string name, BigInteger serial, AsymmetricCipherKeyPair key, BCert issuer, AsymmetricCipherKeyPair issuerKey, string ocsp = null, string crl = null)
+    internal static BCert MakeCert(string name, BigInteger serial, AsymmetricCipherKeyPair key, BCert issuer, AsymmetricCipherKeyPair issuerKey, string ocsp = null, string crl = null, bool timestamp = false, int? keyUsage = null)
     {
         var gen = new X509V3CertificateGenerator();
         gen.SetSerialNumber(serial); gen.SetIssuerDN(issuer?.SubjectDN ?? new X509Name(name)); gen.SetSubjectDN(new X509Name(name));
         gen.SetNotBefore(DateTime.UtcNow.AddDays(-1)); gen.SetNotAfter(DateTime.UtcNow.AddDays(2)); gen.SetPublicKey(key.Public);
         gen.AddExtension(X509Extensions.BasicConstraints, true, new BasicConstraints(issuer == null));
-        gen.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(issuer == null ? KeyUsage.KeyCertSign | KeyUsage.CrlSign : KeyUsage.DigitalSignature));
+        gen.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(keyUsage ?? (issuer == null ? KeyUsage.KeyCertSign | KeyUsage.CrlSign : KeyUsage.DigitalSignature)));
+        if (timestamp) gen.AddExtension(X509Extensions.ExtendedKeyUsage, true, new ExtendedKeyUsage(KeyPurposeID.id_kp_timeStamping));
         if (ocsp != null) gen.AddExtension(X509Extensions.AuthorityInfoAccess, false, new AuthorityInformationAccess(AccessDescription.IdADOcsp, new GeneralName(GeneralName.UniformResourceIdentifier, ocsp)));
         if (crl != null) gen.AddExtension(X509Extensions.CrlDistributionPoints, false, new CrlDistPoint(new[] { new DistributionPoint(new DistributionPointName(new GeneralNames(new GeneralName(GeneralName.UniformResourceIdentifier, crl))), null, null) }));
         return gen.Generate(new Asn1SignatureFactory("SHA256WITHRSA", (issuerKey ?? key).Private));
     }
-    internal static CertificateList MakeCrl(BCert issuer, AsymmetricCipherKeyPair key, string distributionPoint = null, BigInteger revoked = null)
+    internal static Egelke.EHealth.Client.Pki.CertificateRevocationList MakeCrl(BCert issuer, AsymmetricCipherKeyPair key, string distributionPoint = null, BigInteger revoked = null)
     {
         var gen = new X509V2CrlGenerator();
         gen.SetIssuerDN(issuer.SubjectDN); gen.SetThisUpdate(DateTime.UtcNow.AddMinutes(-1)); gen.SetNextUpdate(DateTime.UtcNow.AddHours(1));
         if (distributionPoint != null) gen.AddExtension(X509Extensions.IssuingDistributionPoint, true, new IssuingDistributionPoint(new DistributionPointName(new GeneralNames(new GeneralName(GeneralName.UniformResourceIdentifier, distributionPoint))), false, false, null, false, false));
         if (revoked != null) gen.AddCrlEntry(revoked, DateTime.UtcNow.AddHours(-1), CrlReason.KeyCompromise);
-        return CertificateList.GetInstance(Asn1Object.FromByteArray(gen.Generate(new Asn1SignatureFactory("SHA256WITHRSA", key.Private)).GetEncoded()));
+        return Egelke.EHealth.Client.Pki.CertificateRevocationList.Parse(gen.Generate(new Asn1SignatureFactory("SHA256WITHRSA", key.Private)).GetEncoded());
     }
     internal sealed class FixtureServer : IDisposable
     {

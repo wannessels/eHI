@@ -1,4 +1,4 @@
-﻿/*
+/*
  * This file is part of .Net ETEE for eHealth.
  * Copyright (C) 2014-2020 Egelke
  * 
@@ -20,8 +20,6 @@
 using System;
 using System.Security.Cryptography.X509Certificates;
 using Egelke.EHealth.Client.Pki;
-using Org.BouncyCastle.Security;
-using BC = Org.BouncyCastle;
 using System.Security.Cryptography;
 
 using Microsoft.Extensions.Logging;
@@ -126,14 +124,12 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
         private static void ValidateCertificates(X509Certificate2 authSign, X509Certificate2 nonRepCert) {
             if (authSign == null) throw new ArgumentNullException("authSign", "The authentication certificate must be provided");
             if (!authSign.HasPrivateKey) throw new ArgumentException("authSign", "The authentication certificate must have a private key");
-            BC::X509.X509Certificate bcAuthentication = DotNetUtilities.FromX509Certificate(authSign);
-            if (!bcAuthentication.GetKeyUsage()[0]) throw new ArgumentException("authSign", "The authentication certificate must have a key for signing");
+            if (!Egelke.EHealth.Client.Pki.CryptoEncoding.HasKeyUsage(authSign, 0)) throw new ArgumentException("authSign", "The authentication certificate must have a key for signing");
 
             if (nonRepCert != null)
             {
                 if (!nonRepCert.HasPrivateKey) throw new ArgumentException("nonRepCert", "The non-repudiation certificate must have a private key");
-                BC::X509.X509Certificate bcNonRepudiation = DotNetUtilities.FromX509Certificate(nonRepCert);
-                if (!bcNonRepudiation.GetKeyUsage()[1]) throw new ArgumentException("nonRepCert", "The non-repudiation certificate must have a key for non-Repudiation");
+                if (!Egelke.EHealth.Client.Pki.CryptoEncoding.HasKeyUsage(nonRepCert, 1)) throw new ArgumentException("nonRepCert", "The non-repudiation certificate must have a key for non-Repudiation");
             }
         }
     }

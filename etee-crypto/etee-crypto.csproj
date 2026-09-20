@@ -1,42 +1,34 @@
-﻿<Project Sdk="Microsoft.NET.Sdk" ToolsVersion="Current">
-	<PropertyGroup>
-		<TargetFrameworks>net462;net6.0</TargetFrameworks>
-		<RootNamespace>Egelke.EHealth.Etee.Crypto</RootNamespace>
-		<AssemblyName>Egelke.EHealth.Etee.Crypto</AssemblyName>
-		<Version>3.0.0-RC2</Version>
-		<AssemblyVersion>3.0.0.2</AssemblyVersion>
-		<FileVersion>3.0.0.2</FileVersion>
-		<Authors>Egelke BVBA</Authors>
-		<Product>E2EE</Product>
-		<Description>.Net End-To-End Encryption Library for eHealth</Description>
-		<Copyright>Copyright © Egelke BVBA 2013-2025</Copyright>
-		<PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
-		<PackageProjectUrl>https://github.com/egelke/eHI</PackageProjectUrl>
-		<PackageTags>eHealth Encrpytion</PackageTags>
-		<PackageReleaseNotes>Support for ECDSA keys</PackageReleaseNotes>
-		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-		<SignAssembly>true</SignAssembly>
-		<RepositoryUrl>https://github.com/egelke/ehi.git</RepositoryUrl>
-		<RepositoryType>git</RepositoryType>
-		<IncludeSource>true</IncludeSource>
-		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
-	</PropertyGroup>
-
-	<ItemGroup>
-		<ProjectReference Include="..\pki-module\pki-module.csproj" />
-		<PackageReference Include="BouncyCastle.Cryptography" Version="[2.6.0,)" />
-		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="[9.0.0,)" />
-	</ItemGroup>
-
-	<ItemGroup Condition="'$(TargetFramework)' == 'net462'">
-		<PackageReference Include="Microsoft.Extensions.Logging.TraceSource" Version="[9.0.0,)" />
-	</ItemGroup>
-
-	<PropertyGroup Condition="'$(Configuration)' == 'Debug'">
-		<AssemblyOriginatorKeyFile>..\debug.snk</AssemblyOriginatorKeyFile>
-	</PropertyGroup>
-
-	<PropertyGroup Condition="'$(Configuration)' == 'Release'">
-		<AssemblyOriginatorKeyFile>..\release.snk</AssemblyOriginatorKeyFile>
-	</PropertyGroup>
+<Project Sdk="Microsoft.NET.Sdk" ToolsVersion="Current">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Egelke.EHealth.Etee.Crypto</RootNamespace>
+    <AssemblyName>Egelke.EHealth.Etee.Crypto</AssemblyName>
+    <Version>3.0.0-RC2</Version>
+    <AssemblyVersion>3.0.0.2</AssemblyVersion>
+    <FileVersion>3.0.0.2</FileVersion>
+    <Authors>Egelke BVBA</Authors>
+    <Product>E2EE</Product>
+    <Description>.Net End-To-End Encryption Library for eHealth</Description>
+    <Copyright>Copyright © Egelke BVBA 2013-2025</Copyright>
+    <PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/egelke/eHI</PackageProjectUrl>
+    <PackageTags>eHealth Encrpytion</PackageTags>
+    <PackageReleaseNotes>Support for ECDSA keys</PackageReleaseNotes>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <SignAssembly>true</SignAssembly>
+    <RepositoryUrl>https://github.com/egelke/ehi.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <IncludeSource>true</IncludeSource>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\pki-module\pki-module.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <AssemblyOriginatorKeyFile>..\debug.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <AssemblyOriginatorKeyFile>..\release.snk</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
 </Project>

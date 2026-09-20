@@ -21,7 +21,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using Org.BouncyCastle.Tsp;
 
 namespace Egelke.EHealth.Client.Services.Tsa
 {

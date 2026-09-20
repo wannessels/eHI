@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IdentityModel.Claims;
 using System.Linq;
@@ -9,7 +9,6 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Egelke.EHealth.Client.Sts;
 using Egelke.EHealth.Etee.Crypto;
-using Org.BouncyCastle.Crypto;
 
 namespace Egelke.EHealth.Client.Services
 {

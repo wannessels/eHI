@@ -1,4 +1,4 @@
-﻿/*
+/*
  * This file is part of .Net ETEE for eHealth.
  * Copyright (C) 2014 Egelke
  * 
@@ -20,7 +20,6 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Security.Cryptography;
-using Org.BouncyCastle.Security;
 
 namespace Egelke.EHealth.Etee.Crypto.Configuration
 {

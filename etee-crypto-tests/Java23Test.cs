@@ -1,8 +1,8 @@
-﻿using Egelke.EHealth.Client.Pki;
+using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Etee.Crypto;
 using Egelke.EHealth.Etee.Crypto.Sender;
 using Microsoft.Extensions.Logging;
-using Org.BouncyCastle.Asn1.X509;
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;

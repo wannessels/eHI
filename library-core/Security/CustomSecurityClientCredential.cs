@@ -1,4 +1,4 @@
-﻿/*
+/*
  *  This file is part of eH-I.
  *  Copyright (C) 2025 Egelke BVBA
  *
@@ -21,7 +21,6 @@ using System.Collections.Generic;
 using System.Security.Cryptography.X509Certificates;
 using System.ServiceModel;
 using System.Text;
-using Org.BouncyCastle.Tls;
 
 namespace Egelke.EHealth.Client.Security
 {

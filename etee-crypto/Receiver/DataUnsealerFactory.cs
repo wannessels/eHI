@@ -1,4 +1,4 @@
-﻿/*
+/*
  * This file is part of .Net ETEE for eHealth.
  * Copyright (C) 2014 Egelke BVBA
  * 
@@ -17,18 +17,15 @@
  */
 
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Text;
 using System.Security.Cryptography.X509Certificates;
 using Egelke.EHealth.Etee.Crypto.Configuration;
 using Egelke.EHealth.Client.Pki;
-using Org.BouncyCastle.Security;
 using Egelke.EHealth.Etee.Crypto.Utils;
-using Org.BouncyCastle.X509.Store;
 using System.Collections;
 using System.Net;
-using Org.BouncyCastle.Utilities.Collections;
-using BC = Org.BouncyCastle.X509;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -59,7 +56,7 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
         /// Creates an instance of the <see cref="IDataUnsealer"/> interface to unseal messages.
         /// </summary>
         /// <seealso cref="Create(Level?, EHealthP12[])"/>
-        /// <param name="encCerts">Own (eHealth issued) certificates with private key that can be used to decrypt, they must have an <strong>exportable</strong> private key</param>
+        /// <param name="encCerts">Own (eHealth issued) certificates with private key that can be used to decrypt, private keys are used through their platform provider and need not be exportable</param>
         /// <param name="authCertChains">Own eHealth issued certificate that where used to create encryption certificates, with the chain if not present in the windows store</param>
         /// <param name="level">The required level of the sender signatures or <c>null</c> for only basic validation without revocation checks</param>
         /// <returns>Instance of the IDataUnsealer</returns>
@@ -112,7 +109,7 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
         /// Creates an instance of the <see cref="IDataUnsealer"/> interface to unseal messages that where obtained from a time-mark authority.
         /// </summary>
         /// <seealso cref="CreateFromTimemarkAuthority(Level, ITimemarkProvider, EHealthP12[])"/>
-        /// <param name="encCerts">Own (eHealth issued) certificates with private key that can be used to decrypt, they must have an <strong>exportable</strong> private key</param>
+        /// <param name="encCerts">Own (eHealth issued) certificates with private key that can be used to decrypt, private keys are used through their platform provider and need not be exportable</param>
         /// <param name="authCertChains">Own eHealth issued certificate that where used to create encryption certificates, with the chain if not present in the windows store</param>
         /// <param name="level">The required level of the sender signatures, either T-Level, LT-Level or LTA-Level</param>
         /// <param name="timemarkauthority">The client of the time-mark authority</param>
@@ -160,16 +157,8 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
             return CreateFromTimemarkAuthority(level, timemarkauthority, encCerts, allCerts, ownWebKeys);
         }
 
-        private static IStore<BC::X509Certificate> ToStore(X509Certificate2Collection certs)
-        {
-            List<BC::X509Certificate> senderChainCollection = new List<BC.X509Certificate>();
-            foreach (X509Certificate2 cert in certs)
-            {
-                senderChainCollection.Add(DotNetUtilities.FromX509Certificate(cert));
-            }
-            return CollectionUtilities.CreateStore(senderChainCollection);
-        }
-
+        private static X509Certificate2Collection ToStore(X509Certificate2Collection certs)
+            => new X509Certificate2Collection((certs ?? new X509Certificate2Collection()).Cast<X509Certificate2>().Select(c => new X509Certificate2(c.RawData)).ToArray());
         private static void Extract(EHealthP12[] p12s, out X509Certificate2Collection encCerts, out X509Certificate2Collection allCerts)
         {
             //split is far from prefect, but that only means that the rest of the code has to do some better lookup

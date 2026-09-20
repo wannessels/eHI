@@ -20,28 +20,17 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
-using BC = Org.BouncyCastle;
-using BCX = Org.BouncyCastle.X509;
-using BCA = Org.BouncyCastle.Asn1;
-using BCAX = Org.BouncyCastle.Asn1.X509;
-using BCAO = Org.BouncyCastle.Asn1.Ocsp;
-using BCS = Org.BouncyCastle.X509.Store;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
-using BCO = Org.BouncyCastle.Ocsp;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.IO;
-using Org.BouncyCastle.Security;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Collections;
 using System.Security.Cryptography;
-using Org.BouncyCastle.Asn1;
-using Org.BouncyCastle.Asn1.X509;
 using X509Extension = System.Security.Cryptography.X509Certificates.X509Extension;
-using Org.BouncyCastle.Asn1.Oiw;
 
 namespace Egelke.EHealth.Client.Pki
 {
@@ -69,8 +58,8 @@ namespace Egelke.EHealth.Client.Pki
         private static readonly TimeSpan ClockSkewness = new TimeSpan(0, 5, 0);
         private static readonly TraceSource trace = new TraceSource("Egelke.EHealth.Tsa");
         private static readonly HttpClient http = new HttpClient() { Timeout = Timeout.InfiniteTimeSpan };
-        private static readonly AsyncSingleFlight<string, BCAO.OcspResponse> ocspDownloads = new AsyncSingleFlight<string, BCAO.OcspResponse>();
-        private static readonly AsyncSingleFlight<string, BCAX.CertificateList> crlDownloads = new AsyncSingleFlight<string, BCAX.CertificateList>();
+        private static readonly AsyncSingleFlight<string, OcspResponse> ocspDownloads = new AsyncSingleFlight<string, OcspResponse>();
+        private static readonly AsyncSingleFlight<string, CertificateRevocationList> crlDownloads = new AsyncSingleFlight<string, CertificateRevocationList>();
 
         /// <summary>
         /// Maximum time to wait for a single OCSP responder, defaults to 5 seconds.
@@ -95,6 +84,9 @@ namespace Egelke.EHealth.Client.Pki
         /// </remarks>
         public static bool DisableCertificateDownloads { get; set; } = false;
 
+        /// <summary>Optional explicit trust anchors. Null uses the operating-system trust store. Configure before serving requests.</summary>
+        public static X509Certificate2Collection CustomTrustStore { get; set; }
+
         /// <summary>
         /// Wrapper of the X509Chain, just for compatbility
         /// </summary>
@@ -115,6 +107,11 @@ namespace Egelke.EHealth.Client.Pki
             {
                 if (extraStore != null) x509Chain.ChainPolicy.ExtraStore.AddRange(extraStore);
                 x509Chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                if (CustomTrustStore != null)
+                {
+                    x509Chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+                    x509Chain.ChainPolicy.CustomTrustStore.AddRange(CustomTrustStore);
+                }
                 x509Chain.ChainPolicy.VerificationTime = validationTime;
                 x509Chain.ChainPolicy.UrlRetrievalTimeout = OperationScope.LimitTimeout(UrlRetrievalTimeout);
 #if NET5_0_OR_GREATER
@@ -159,7 +156,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <param name="crls">Already known crl's, newly retrieved CRL's will be added here</param>
         /// <param name="ocsps">Already konwn ocsp's, newly retreived OCSP's will be added here</param>
         /// <returns>The chain with all the information about validity</returns>
-        public static Chain BuildChain(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<BCAX.CertificateList> crls, IList<BCAO.BasicOcspResponse> ocsps)
+        public static Chain BuildChain(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<CertificateRevocationList> crls, IList<OcspResponse> ocsps)
         {
             return cert.BuildChainAsync(validationTime, extraStore, crls, ocsps).ConfigureAwait(false).GetAwaiter().GetResult();
         }
@@ -173,14 +170,14 @@ namespace Egelke.EHealth.Client.Pki
         /// <param name="crls">Already known crl's, newly retrieved CRL's will be added here</param>
         /// <param name="ocsps">Already konwn ocsp's, newly retreived OCSP's will be added here</param>
         /// <returns>The chain with all the information about validity</returns>
-        public static Task<Chain> BuildChainAsync(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<BCAX.CertificateList> crls, IList<BCAO.BasicOcspResponse> ocsps)
+        public static Task<Chain> BuildChainAsync(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<CertificateRevocationList> crls, IList<OcspResponse> ocsps)
             => BuildChainAsync(cert, validationTime, extraStore, crls, ocsps, CancellationToken.None);
 
         /// <summary>Builds and validates a chain under the shared admission/deadline policy.</summary>
-        public static Task<Chain> BuildChainAsync(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<BCAX.CertificateList> crls, IList<BCAO.BasicOcspResponse> ocsps, CancellationToken cancellationToken)
+        public static Task<Chain> BuildChainAsync(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<CertificateRevocationList> crls, IList<OcspResponse> ocsps, CancellationToken cancellationToken)
             => OperationPolicy.Default.RunAsync(_ => BuildChainCoreAsync(cert, validationTime, extraStore, crls, ocsps), cancellationToken);
 
-        private static async Task<Chain> BuildChainCoreAsync(X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<BCAX.CertificateList> crls, IList<BCAO.BasicOcspResponse> ocsps)
+        private static async Task<Chain> BuildChainCoreAsync(X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<CertificateRevocationList> crls, IList<OcspResponse> ocsps)
         {
             Chain chain = cert.BuildChain(validationTime, extraStore);
 
@@ -195,11 +192,11 @@ namespace Egelke.EHealth.Client.Pki
 
                 try
                 {
-                    BCAO.BasicOcspResponse ocspResponse = null;
+                    OcspResponse ocspResponse = null;
                     try
                     {
                         ocspResponse = nextCert.Verify(nextIssuer, validationTime, ocsps);
-                        if (ocspResponse == null && RevocationCache.TryGetOcsp(nextCert, nextIssuer, out BCAO.BasicOcspResponse cachedOcsp))
+                        if (ocspResponse == null && RevocationCache.TryGetOcsp(nextCert, nextIssuer, out OcspResponse cachedOcsp))
                         {
                             ocsps.Add(cachedOcsp);
                             ocspResponse = nextCert.Verify(nextIssuer, validationTime, ocsps);
@@ -208,21 +205,21 @@ namespace Egelke.EHealth.Client.Pki
                         {
                             // Fresh local evidence is sufficient; do not wait for a failing responder first.
                             if (VerifyAvailableCrl(nextCert, nextIssuer, validationTime, crls)) continue;
-                            BCAO.OcspResponse ocspMsg = await nextCert.GetOcspResponseAsync(nextIssuer).ConfigureAwait(false);
+                            OcspResponse ocspMsg = await nextCert.GetOcspResponseAsync(nextIssuer).ConfigureAwait(false);
                             if (ocspMsg != null)
                             {
-                                var downloaded = BCAO.BasicOcspResponse.GetInstance(BCA.Asn1Object.FromByteArray(ocspMsg.ResponseBytes.Response.GetOctets()));
+                                var downloaded = ocspMsg;
                                 ocsps.Add(downloaded);
                                 ocspResponse = nextCert.Verify(nextIssuer, validationTime, ocsps);
                                 if (ocspResponse != null) RevocationCache.PutOcsp(nextCert, nextIssuer, ocspResponse);
                             }
                         }
                     }
-                    catch (RevocationException<BCAO.BasicOcspResponse>)
+                    catch (RevocationException<OcspResponse>)
                     {
                         throw;
                     }
-                    catch (RevocationException<BCAX.CertificateList>)
+                    catch (RevocationException<CertificateRevocationList>)
                     {
                         throw;
                     }
@@ -235,8 +232,8 @@ namespace Egelke.EHealth.Client.Pki
 
                     if (ocspResponse == null)
                     {
-                        BCAX.CertificateList crl = nextCert.Verify(nextIssuer, validationTime, crls);
-                        if (crl == null && RevocationCache.TryGetCrl(nextCert, nextIssuer, out BCAX.CertificateList cachedCrl))
+                        CertificateRevocationList crl = nextCert.Verify(nextIssuer, validationTime, crls);
+                        if (crl == null && RevocationCache.TryGetCrl(nextCert, nextIssuer, out CertificateRevocationList cachedCrl))
                         {
                             crls.Add(cachedCrl);
                             crl = nextCert.Verify(nextIssuer, validationTime, crls);
@@ -254,12 +251,12 @@ namespace Egelke.EHealth.Client.Pki
                         if (crl == null) throw new RevocationUnknownException("No applicable revocation evidence was found");
                     }
                 }
-                catch (RevocationException<BCAO.BasicOcspResponse> revoked)
+                catch (RevocationException<OcspResponse> revoked)
                 {
                     RevocationCache.PutOcsp(nextCert, nextIssuer, revoked.RevocationInfo);
                     AddErrorStatus(chain.ChainStatus, chain.ChainElements[i].ChainElementStatus, X509ChainStatusFlags.Revoked, "The certificate has been revoked");
                 }
-                catch (RevocationException<BCAX.CertificateList> revoked)
+                catch (RevocationException<CertificateRevocationList> revoked)
                 {
                     RevocationCache.PutCrl(nextCert, nextIssuer, revoked.RevocationInfo);
                     AddErrorStatus(chain.ChainStatus, chain.ChainElements[i].ChainElementStatus, X509ChainStatusFlags.Revoked, "The certificate has been revoked");
@@ -273,7 +270,7 @@ namespace Egelke.EHealth.Client.Pki
             return chain;
         }
 
-        private static bool VerifyAvailableCrl(X509Certificate2 cert, X509Certificate2 issuer, DateTime time, IList<BCAX.CertificateList> crls)
+        private static bool VerifyAvailableCrl(X509Certificate2 cert, X509Certificate2 issuer, DateTime time, IList<CertificateRevocationList> crls)
         {
             try
             {
@@ -282,7 +279,7 @@ namespace Egelke.EHealth.Client.Pki
                 crls.Add(cached);
                 return cert.Verify(issuer, time, crls) != null;
             }
-            catch (RevocationException<BCAX.CertificateList>) { throw; }
+            catch (RevocationException<CertificateRevocationList>) { throw; }
             catch (Exception error)
             {
                 OperationScope.Cancellation.ThrowIfCancellationRequested();
@@ -297,7 +294,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns><c>true</c>When present, <c>false</c>otherwise</returns>
         public static bool IsOcspNoCheck(this X509Certificate2 certificate)
         {
-            return certificate.Extensions[BCAO.OcspObjectIdentifiers.PkixOcspNocheck.Id] != null;
+            return certificate.Extensions["1.3.6.1.5.5.7.48.1.5"] != null;
         }
 
         /// <summary>
@@ -310,110 +307,17 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns>The OCSP response that was used, <c>null</c> if none was found</returns>
         /// <exception cref="RevocationException{T}">When the certificate was revoked on the provided time</exception>
         /// <exception cref="RevocationUnknownException">When the certificate (or the OCSP) can't be validated</exception>
-        public static BCAO.BasicOcspResponse Verify(this X509Certificate2 certificate, X509Certificate2 issuer, DateTime validationTime, IList<BCAO.BasicOcspResponse> ocspResponses)
+        public static OcspResponse Verify(this X509Certificate2 certificate, X509Certificate2 issuer, DateTime validationTime, IList<OcspResponse> ocspResponses)
         {
-            DateTime minTime = validationTime - ClockSkewness;
-            DateTime maxTime = validationTime + ClockSkewness;
-            BCX.X509Certificate certificateBC = DotNetUtilities.FromX509Certificate(certificate);
-            BCX.X509Certificate issuerBC = DotNetUtilities.FromX509Certificate(issuer);
-
-            ValueWithRef<BCO.SingleResp, ValueWithRef<BCO.BasicOcspResp, BCAO.BasicOcspResponse>> singleOcspRespLeaf = ocspResponses
-                .Select((rsp) => new ValueWithRef<BCO.BasicOcspResp, BCAO.BasicOcspResponse>(new BCO.BasicOcspResp(rsp), rsp)) //convert, but keep the original
-                .SelectMany((r) => r.Value.Responses.Select(sr => new ValueWithRef<BCO.SingleResp, ValueWithRef<BCO.BasicOcspResp, BCAO.BasicOcspResponse>>(sr, r))) //get the single respononses, but keep the parent
-                .Where((sr) => sr.Value.GetCertID().SerialNumber.Equals(certificateBC.SerialNumber) && sr.Value.GetCertID().MatchesIssuer(issuerBC)) //is it for this cert?
-                .Where((sr) => sr.Value.ThisUpdate >= minTime || (sr.Value.NextUpdate != null && sr.Value.NextUpdate.Value >= minTime)) //was it issued on time?
-                .OrderByDescending((sr) => sr.Value.ThisUpdate) //newest first
-                .FirstOrDefault();
-
-            if (singleOcspRespLeaf == null)
-                return null;
-
-            BCO.SingleResp singleOcspResp = singleOcspRespLeaf.Value;
-            BCO.BasicOcspResp basicOcspResp = singleOcspRespLeaf.Reference.Value;
-            BCAO.BasicOcspResponse basicOcspResponse = singleOcspRespLeaf.Reference.Reference;
-
-            //get the signer name
-            BCX.X509Certificate ocspSignerBc;
-            BCAX.X509Name responderName = basicOcspResp.ResponderId.ToAsn1Object().Name;
-            byte[] keyHash = basicOcspResp.ResponderId.ToAsn1Object().GetKeyHash();
-            if (responderName != null)
-            {
-                //Get the signer certificate via name
-                var selector = new BCS.X509CertStoreSelector
-                {
-                    Subject = responderName
-                };
-                ocspSignerBc = basicOcspResp
-                    .GetCertificates()
-                    .EnumerateMatches(selector)
-                    .Cast<BCX.X509Certificate>()
-                    .FirstOrDefault();
-            }
-            else if (keyHash != null)
-            {
-                //Get the signer certificate via key hash
-                using (var sha1 = SHA1.Create())
-                {
-                    ocspSignerBc = basicOcspResp
-                        .GetCertificates()
-                        .EnumerateMatches(null)
-                        .Cast<BCX.X509Certificate>()
-                        .Where(c =>
-                        {
-                            byte[] certKey = c.CertificateStructure.SubjectPublicKeyInfo.PublicKey.GetBytes();
-                            byte[] certkeyHash = sha1.ComputeHash(certKey);
-                            return Enumerable.SequenceEqual(certkeyHash, keyHash);
-                        })
-                        .FirstOrDefault();
-                }
-            }
-            else
-            {
-                trace.TraceEvent(TraceEventType.Error, 0, "OCSP response for {0} does not have a ResponderID", certificate.Subject);
-                throw new RevocationUnknownException("OCSP response for {0} does not have a ResponderID");
-            }
-
-            if (ocspSignerBc == null)
-                throw new RevocationUnknownException("The OCSP is signed by a unknown certificate");
-
-            //verify the response signature
-            if (!basicOcspResp.Verify(ocspSignerBc.GetPublicKey()))
-                throw new RevocationUnknownException("The OCSP has an invalid signature");
-
-
-            //OCSP must be issued by same issuer an the certificate that it validates.
-            try
-            {
-                if (!ocspSignerBc.IssuerDN.Equals(issuerBC.SubjectDN)) throw new ApplicationException();
-                ocspSignerBc.Verify(issuerBC.GetPublicKey());
-            }
-            catch (Exception e)
-            {
-                throw new RevocationUnknownException("The OCSP signer was not issued by the proper CA", e);
-            }
-
-            //verify if the OCSP signer certificate is stil valid
-            if (!ocspSignerBc.IsValid(basicOcspResp.ProducedAt))
-                throw new RevocationUnknownException("The OCSP signer was not valid at the time the ocsp was issued");
-
-
-            //check if the signer may issue OCSP
-            IList<DerObjectIdentifier> ocspSignerExtKeyUsage = ocspSignerBc.GetExtendedKeyUsage();
-            if (!ocspSignerExtKeyUsage.Contains(KeyPurposeID.id_kp_OCSPSigning)) // 1.3.6.1.5.5.7.3.9
-                throw new RevocationUnknownException("The OCSP is signed by a certificate that isn't allowed to sign OCSP");
-
-            //finally, check if the certificate is revoked or not
-            var revokedStatus = (BCO.RevokedStatus)singleOcspResp.GetCertStatus();
-            if (revokedStatus != null)
-            {
-                trace.TraceEvent(TraceEventType.Verbose, 0, "OCSP response for {0} indicates that the certificate is revoked on {1}", certificate.Subject, revokedStatus.RevocationTime);
-                if (maxTime >= revokedStatus.RevocationTime)
-                    throw new RevocationException<BCAO.BasicOcspResponse>(basicOcspResponse, "The certificate was revoked on " + revokedStatus.RevocationTime.ToString("o"));
-            }
-
-            return basicOcspResponse;
+            var selected = ocspResponses.Select(response => new { Response = response, Status = response.Match(certificate, issuer, validationTime, ClockSkewness) })
+                .Where(item => item.Status != null).OrderByDescending(item => item.Status.ThisUpdate).FirstOrDefault();
+            if (selected == null) return null;
+            selected.Response.Verify(issuer);
+            if (selected.Status.Status == 2) throw new RevocationUnknownException("OCSP responder does not know this certificate");
+            if (selected.Status.RevocationTime <= validationTime + ClockSkewness)
+                throw new RevocationException<OcspResponse>(selected.Response, "The certificate was revoked on " + selected.Status.RevocationTime.Value.ToString("o"));
+            return selected.Response;
         }
-
         /// <summary>
         /// Validates the cert with the provided crl responses.
         /// </summary>
@@ -424,76 +328,18 @@ namespace Egelke.EHealth.Client.Pki
         /// <returns>The crl response that was used, <c>null</c> if none used</returns>
         /// <exception cref="RevocationException{T}">When the certificate was revoked on the provided time</exception>
         /// <exception cref="RevocationUnknownException">When the certificate (or the crl) can't be validated</exception>
-        public static BCAX.CertificateList Verify(this X509Certificate2 certificate, X509Certificate2 issuer, DateTime validationTime, IList<BCAX.CertificateList> certLists)
+        public static CertificateRevocationList Verify(this X509Certificate2 certificate, X509Certificate2 issuer, DateTime validationTime, IList<CertificateRevocationList> certLists)
         {
-            DateTime minTime = validationTime - ClockSkewness;
-            DateTime maxTime = validationTime + ClockSkewness;
-            BCX.X509Certificate certificateBC = DotNetUtilities.FromX509Certificate(certificate);
-            BCX.X509Certificate issuerBC = DotNetUtilities.FromX509Certificate(issuer);
-
-            ValueWithRef<ParsedCrl, BCAX.CertificateList> crlWithOrg = certLists
-                .Select((c) => new ValueWithRef<ParsedCrl, BCAX.CertificateList>(ParsedCrl.Get(c), c)) //convert, keep orginal
-                .Where((c) => c.Value.Crl.IssuerDN.Equals(certificateBC.IssuerDN))
-                .Where((c) => IsApplicableCrl(certificateBC, c.Value.Crl))
-                .Where((c) => c.Value.Crl.ThisUpdate >= minTime || (c.Value.Crl.NextUpdate != null && c.Value.Crl.NextUpdate.Value >= minTime))
-                .OrderByDescending((c) => c.Value.Crl.ThisUpdate)
-                .FirstOrDefault();
-
-            if (crlWithOrg == null)
-                return null;
-
-            ParsedCrl crl = crlWithOrg.Value;
-            BCAX.CertificateList certList = crlWithOrg.Reference;
-
-            //check the signature (no need the check the issuer here)
-            try
-            {
-                crl.Verify(issuerBC.GetPublicKey());
-            }
-            catch (Exception e)
-            {
-                throw new RevocationUnknownException("The CRL has an invalid signature", e);
-            }
-
-            //check the signer (only the part relevant for CRL)
-            if (!issuerBC.GetKeyUsage()[6])
-            {
-                throw new RevocationUnknownException("The CRL was signed with a certificate that isn't allowed to sign CRLs");
-            }
-
-            //check if the certificate is revoked
-            BCX.X509CrlEntry crlEntry = crl.GetRevokedCertificate(certificateBC.SerialNumber);
-            if (crlEntry != null)
-            {
-                trace.TraceEvent(TraceEventType.Verbose, 0, "CRL indicates that {0} is revoked on {1}", certificate.Subject, crlEntry.RevocationDate);
-                if (maxTime >= crlEntry.RevocationDate)
-                {
-                    throw new RevocationException<BCAX.CertificateList>(certList, "The certificate was revoked on " + crlEntry.RevocationDate.ToString("o"));
-                }
-            }
-
-            return certList;
+            var crl = certLists.Where(value => value.Covers(certificate, issuer) && value.ThisUpdate <= DateTime.UtcNow + ClockSkewness &&
+                (value.ThisUpdate >= validationTime - ClockSkewness || value.NextUpdate >= validationTime - ClockSkewness))
+                .OrderByDescending(value => value.ThisUpdate).FirstOrDefault();
+            if (crl == null) return null;
+            crl.Verify(issuer);
+            DateTime? revoked = crl.RevocationTime(certificate);
+            if (revoked <= validationTime + ClockSkewness)
+                throw new RevocationException<CertificateRevocationList>(crl, "The certificate was revoked on " + revoked.Value.ToString("o"));
+            return crl;
         }
-
-        private static bool IsApplicableCrl(BCX.X509Certificate cert, BCX.X509Crl crl)
-        {
-            // Delta, indirect and reason-partitioned CRLs require evidence-combination logic we do not implement.
-            if (crl.GetExtensionValue(BCAX.X509Extensions.DeltaCrlIndicator) != null) return false;
-            var extension = crl.GetExtensionValue(BCAX.X509Extensions.IssuingDistributionPoint);
-            if (extension == null) return true;
-            var scope = BCAX.IssuingDistributionPoint.GetInstance(extension.GetOctets());
-            if (scope.IsIndirectCrl || scope.OnlyContainsAttributeCerts || scope.OnlySomeReasons != null) return false;
-            bool isCa = cert.GetBasicConstraints() >= 0;
-            if (scope.OnlyContainsCACerts && !isCa || scope.OnlyContainsUserCerts && isCa) return false;
-            if (scope.DistributionPoint == null) return true;
-            var pointsExtension = cert.GetExtensionValue(BCAX.X509Extensions.CrlDistributionPoints);
-            if (pointsExtension == null) return false;
-            var points = BCAX.CrlDistPoint.GetInstance(pointsExtension.GetOctets()).GetDistributionPoints();
-            return points.Any(point => point.CrlIssuer == null && point.Reasons == null &&
-                point.DistributionPointName != null && point.DistributionPointName.Equals(scope.DistributionPoint));
-        }
-
-
         /// <summary>
         /// Gets the OCSP response from the server.
         /// </summary>
@@ -504,7 +350,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <param name="issuer">The issue certificate of the certificate to get the server info from</param>
         /// <returns>The OCSP response (parsed) or <c>null</c> when none found</returns>
         /// <exception cref="RevocationUnknownException">When the revocation info can be retreived</exception>
-        public static BCAO.OcspResponse GetOcspResponse(this X509Certificate2 cert, X509Certificate2 issuer)
+        public static OcspResponse GetOcspResponse(this X509Certificate2 cert, X509Certificate2 issuer)
         {
             return cert.GetOcspResponseAsync(issuer).ConfigureAwait(false).GetAwaiter().GetResult();
         }
@@ -519,11 +365,11 @@ namespace Egelke.EHealth.Client.Pki
         /// <param name="issuer">The issue certificate of the certificate to get the server info from</param>
         /// <returns>The OCSP response (parsed) or <c>null</c> when none found</returns>
         /// <exception cref="RevocationUnknownException">When the revocation info can be retreived</exception>
-        public static Task<BCAO.OcspResponse> GetOcspResponseAsync(this X509Certificate2 cert, X509Certificate2 issuer)
+        public static Task<OcspResponse> GetOcspResponseAsync(this X509Certificate2 cert, X509Certificate2 issuer)
             => GetOcspResponseAsync(cert, issuer, OperationScope.Cancellation);
 
         /// <summary>Downloads OCSP evidence, cancelling only this waiter when a fetch is shared.</summary>
-        public static async Task<BCAO.OcspResponse> GetOcspResponseAsync(this X509Certificate2 cert, X509Certificate2 issuer, CancellationToken cancellationToken)
+        public static async Task<OcspResponse> GetOcspResponseAsync(this X509Certificate2 cert, X509Certificate2 issuer, CancellationToken cancellationToken)
         {
             using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, OperationScope.Cancellation))
             {
@@ -536,7 +382,7 @@ namespace Egelke.EHealth.Client.Pki
                     cancellationToken.ThrowIfCancellationRequested();
                     try
                     {
-                        if (ocspReqBytes == null) ocspReqBytes = cert.GetOcspReqBody(issuer).GetEncoded();
+                        if (ocspReqBytes == null) ocspReqBytes = cert.GetOcspReqBody(issuer);
 
                         byte[] request = ocspReqBytes;
                         return await ocspDownloads.RunAsync(uri.AbsoluteUri + "|" + issuer.Thumbprint + "|" + cert.SerialNumber,
@@ -554,7 +400,7 @@ namespace Egelke.EHealth.Client.Pki
             }
         }
 
-        private static async Task<BCAO.OcspResponse> DownloadOcspAsync(Uri uri, byte[] request, CancellationToken cancellationToken)
+        private static async Task<OcspResponse> DownloadOcspAsync(Uri uri, byte[] request, CancellationToken cancellationToken)
         {
             using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             using (var content = new ByteArrayContent(request))
@@ -569,42 +415,34 @@ namespace Egelke.EHealth.Client.Pki
             }
         }
 
-        private static BCO.OcspReq GetOcspReqBody(this X509Certificate2 cert, X509Certificate2 issuer)
+        private static byte[] GetOcspReqBody(this X509Certificate2 cert, X509Certificate2 issuer)
         {
-            var ocspReqGen = new BCO.OcspReqGenerator();
-            ocspReqGen.AddRequest(
-                new BCO.CertificateID(
-                    new AlgorithmIdentifier(OiwObjectIdentifiers.IdSha1),
-                    DotNetUtilities.FromX509Certificate(issuer),
-                    DotNetUtilities.FromX509Certificate(cert).SerialNumber));
-            return ocspReqGen.Generate();
-        }
-
-        private static BCAO.OcspResponse ParseOCSPResponse(byte[] ocspRspBytes)
-        {
-            BCAO.OcspResponse ocspResponse = BCAO.OcspResponse.GetInstance(BCA.Asn1Sequence.FromByteArray(ocspRspBytes));
-            if (ocspResponse.ResponseStatus.IntValueExact != BCAO.OcspResponseStatus.Successful)
+            var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.DER);
+            using (writer.PushSequence()) using (writer.PushSequence()) using (writer.PushSequence()) using (writer.PushSequence()) using (writer.PushSequence())
             {
-                throw new RevocationUnknownException("OCSP Response with invalid status: " + ocspResponse.ResponseStatus.IntValueExact);
+                CryptoEncoding.WriteAlgorithm(writer, CryptoEncoding.Sha1);
+                writer.WriteOctetString(CryptoEncoding.Hash(CryptoEncoding.Sha1, issuer.SubjectName.RawData));
+                writer.WriteOctetString(CryptoEncoding.Hash(CryptoEncoding.Sha1, issuer.PublicKey.EncodedKeyValue.RawData));
+                writer.WriteIntegerUnsigned(CryptoEncoding.Serial(cert));
             }
-            return ocspResponse;
+            return writer.Encode();
         }
-
+        private static OcspResponse ParseOCSPResponse(byte[] bytes) => OcspResponse.Parse(bytes);
         private static IEnumerable<Uri> GetOCSPUris(this X509Certificate2 cert)
         {
-            X509Extension crlExtention = cert.Extensions[BCAX.X509Extensions.AuthorityInfoAccess.Id];
-            if (crlExtention == null)
-                return Enumerable.Empty<Uri>();
-
-            var aia = BCAX.AuthorityInformationAccess.GetInstance(BCA.Asn1Sequence.FromByteArray(crlExtention.RawData));
-            return aia.GetAccessDescriptions()
-                .Where((ad) => ad.AccessMethod.Id == BCAX.AccessDescription.IdADOcsp.Id)
-                .Select((ad) => ad.AccessLocation)
-                .Where((gn) => gn.TagNo == BCAX.GeneralName.UniformResourceIdentifier && gn.Name is BCA.DerStringBase)
-                .Select((gn) => new Uri(((BCA.DerStringBase)gn.Name).GetString()))
-                .Where((u) => u.Scheme == "http" || u.Scheme == "https");
+            var extension = cert.Extensions["1.3.6.1.5.5.7.1.1"];
+            if (extension == null) yield break;
+            var descriptions = CryptoEncoding.Sequence(extension.RawData);
+            while (descriptions.HasData)
+            {
+                var description = descriptions.ReadSequence(); var method = description.ReadObjectIdentifier();
+                if (method == "1.3.6.1.5.5.7.48.1" && description.PeekTag().HasSameClassAndValue(CryptoEncoding.Context(6, false)))
+                {
+                    var address = description.ReadCharacterString(System.Formats.Asn1.UniversalTagNumber.IA5String, CryptoEncoding.Context(6, false));
+                    if (Uri.TryCreate(address, UriKind.Absolute, out var uri) && (uri.Scheme == "https" || uri.Scheme == "http")) yield return uri;
+                }
+            }
         }
-
         private static void VerifyOCSPRsp(HttpResponseMessage webRsp)
         {
             if (webRsp.StatusCode != HttpStatusCode.OK
@@ -621,7 +459,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <param name="cert">the certificat to get the server info from</param>
         /// <returns>The clr (parsed) or <c>null</c> when none found</returns>
         /// <exception cref="RevocationUnknownException">When the revocation info can be retreived</exception>
-        public static BCAX.CertificateList GetCertificateList(this X509Certificate2 cert)
+        public static CertificateRevocationList GetCertificateList(this X509Certificate2 cert)
         {
             return cert.GetCertificateListAsync().ConfigureAwait(false).GetAwaiter().GetResult();
         }
@@ -632,11 +470,11 @@ namespace Egelke.EHealth.Client.Pki
         /// <param name="cert">the certificat to tge the server info from</param>
         /// <returns>The clr (parsed) or <c>null</c> when none found</returns>
         /// <exception cref="RevocationUnknownException">When the revocation info can be retreived</exception>
-        public static Task<BCAX.CertificateList> GetCertificateListAsync(this X509Certificate2 cert)
+        public static Task<CertificateRevocationList> GetCertificateListAsync(this X509Certificate2 cert)
             => GetCertificateListAsync(cert, OperationScope.Cancellation);
 
         /// <summary>Downloads a CRL, cancelling only this waiter when a fetch is shared.</summary>
-        public static async Task<BCAX.CertificateList> GetCertificateListAsync(this X509Certificate2 cert, CancellationToken cancellationToken)
+        public static async Task<CertificateRevocationList> GetCertificateListAsync(this X509Certificate2 cert, CancellationToken cancellationToken)
         {
             using (var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, OperationScope.Cancellation))
             {
@@ -662,7 +500,7 @@ namespace Egelke.EHealth.Client.Pki
             }
         }
 
-        private static async Task<BCAX.CertificateList> DownloadCrlAsync(Uri uri, CancellationToken cancellationToken)
+        private static async Task<CertificateRevocationList> DownloadCrlAsync(Uri uri, CancellationToken cancellationToken)
         {
             using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
             {
@@ -671,7 +509,7 @@ namespace Egelke.EHealth.Client.Pki
                 {
                     VerifyCrlRsp(response);
                     var body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                    return BCAX.CertificateList.GetInstance(BCA.Asn1Sequence.FromByteArray(body));
+                    return CertificateRevocationList.Parse(body);
                 }
             }
         }
@@ -685,22 +523,7 @@ namespace Egelke.EHealth.Client.Pki
             }
         }
 
-        private static IEnumerable<Uri> GetCrlWebUris(this X509Certificate2 cert)
-        {
-            X509Extension crlExtention = cert.Extensions[BCAX.X509Extensions.CrlDistributionPoints.Id];
-            if (crlExtention == null)
-                return Enumerable.Empty<Uri>();
-
-            var distributionPoint = BCAX.CrlDistPoint.GetInstance(BCA.Asn1Sequence.FromByteArray(crlExtention.RawData));
-            return distributionPoint.GetDistributionPoints()
-                .Select((dp) => dp.DistributionPointName.Name)
-                .Cast<BCAX.GeneralNames>()
-                .SelectMany((gns) => gns.GetNames())
-                .Where((gn) => gn.TagNo == BCAX.GeneralName.UniformResourceIdentifier && gn.Name is BCA.DerStringBase)
-                .Select((gn) => new Uri(((BCA.DerStringBase)gn.Name).GetString()))
-                .Where((u) => u.Scheme == "http" || u.Scheme == "https");
-        }
-
+        private static IEnumerable<Uri> GetCrlWebUris(this X509Certificate2 cert) => CertificateRevocationList.DownloadUris(cert);
 
         internal static void AddErrorStatus(List<X509ChainStatus> chainStatus, List<X509ChainStatus> elementStatus, X509ChainStatusFlags extraStatusFlag, String extraStatusInfo)
         {

@@ -1,7 +1,8 @@
+using CertificateList = Egelke.EHealth.Client.Pki.CertificateRevocationList;
+using BasicOcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+using OcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+using TimeStampToken = System.Security.Cryptography.Pkcs.Rfc3161TimestampToken;
 using Egelke.EHealth.Client.Pki;
-using Org.BouncyCastle.Asn1.Ocsp;
-using Org.BouncyCastle.Asn1.X509;
-using Org.BouncyCastle.Tsp;
 using System;
 using System.Collections.Generic;
 using System.IO;

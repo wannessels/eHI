@@ -2,9 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
-using BCAO = Org.BouncyCastle.Asn1.Ocsp;
-using BCAX = Org.BouncyCastle.Asn1.X509;
-using BCO = Org.BouncyCastle.Ocsp;
 
 namespace Egelke.EHealth.Client.Pki
 {
@@ -48,21 +45,21 @@ namespace Egelke.EHealth.Client.Pki
         /// <summary>Removes retained evidence.</summary>
         public static void Clear() { lock (sync) { entries.Clear(); lru.Clear(); size = 0; } }
 
-        internal static bool TryGetOcsp(X509Certificate2 cert, X509Certificate2 issuer, out BCAO.BasicOcspResponse response)
+        internal static bool TryGetOcsp(X509Certificate2 cert, X509Certificate2 issuer, out OcspResponse response)
             => TryGet(OcspKey(cert, issuer), out response);
-        internal static void PutOcsp(X509Certificate2 cert, X509Certificate2 issuer, BCAO.BasicOcspResponse response)
+        internal static void PutOcsp(X509Certificate2 cert, X509Certificate2 issuer, OcspResponse response)
         {
             if (!Enabled) return;
-            var parsed = new BCO.BasicOcspResp(response);
+            var parsed = response;
             var expires = parsed.Responses.Select(r => r.NextUpdate ?? parsed.ProducedAt + DefaultLifetime).Min();
             Put(OcspKey(cert, issuer), response, expires, response.GetEncoded().LongLength * 4 + 512);
         }
-        internal static bool TryGetCrl(X509Certificate2 cert, X509Certificate2 issuer, out BCAX.CertificateList crl)
+        internal static bool TryGetCrl(X509Certificate2 cert, X509Certificate2 issuer, out CertificateRevocationList crl)
             => TryGet(CrlKey(cert, issuer), out crl);
-        internal static void PutCrl(X509Certificate2 cert, X509Certificate2 issuer, BCAX.CertificateList crl)
+        internal static void PutCrl(X509Certificate2 cert, X509Certificate2 issuer, CertificateRevocationList crl)
         {
             if (!Enabled) return;
-            var parsed = ParsedCrl.Get(crl).Crl;
+            var parsed = crl;
             Put(CrlKey(cert, issuer), crl, parsed.NextUpdate ?? parsed.ThisUpdate + DefaultLifetime,
                 crl.GetEncoded().LongLength * 16 + 1024);
         }
@@ -70,7 +67,7 @@ namespace Egelke.EHealth.Client.Pki
             => "ocsp|" + issuer.Thumbprint + "|" + cert.SerialNumber;
         private static string CrlKey(X509Certificate2 cert, X509Certificate2 issuer)
         {
-            var points = cert.Extensions[BCAX.X509Extensions.CrlDistributionPoints.Id];
+            var points = cert.Extensions["2.5.29.31"];
             return "crl|" + issuer.Thumbprint + "|" + (points == null ? cert.Thumbprint : Convert.ToBase64String(points.RawData));
         }
         private static bool TryGet<T>(string key, out T value) where T : class

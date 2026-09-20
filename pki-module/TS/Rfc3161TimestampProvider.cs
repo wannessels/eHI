@@ -24,7 +24,7 @@ using System.Text;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
-using Org.BouncyCastle.Tsp;
+using System.Security.Cryptography.Pkcs;
 using System.IO;
 using System.Security.Cryptography;
 using System.Diagnostics;
@@ -101,8 +101,8 @@ namespace Egelke.EHealth.Client.Pki
 
         private async Task<byte[]> GetTimestampCoreAsync(byte[] hash, string digestMethod)
         {
-            TimeStampRequest tspReq = CreateRfc3161RequestBody(hash, digestMethod);
-            byte[] tsprBytes = tspReq.GetEncoded();
+            Rfc3161TimestampRequest tspReq = CreateRfc3161RequestBody(hash, digestMethod);
+            byte[] tsprBytes = tspReq.Encode();
             trace.TraceEvent(TraceEventType.Information, 0, "retrieving time-stamp of {0} from {1}", Convert.ToBase64String(hash), address);
 
             using (var cts = CancellationTokenSource.CreateLinkedTokenSource(OperationScope.Cancellation))
@@ -136,15 +136,8 @@ namespace Egelke.EHealth.Client.Pki
             }
         }
 
-        private TimeStampRequest CreateRfc3161RequestBody(byte[] hash, string digestMethod)
-        {
-            String digestOid = ToDigestOid(digestMethod);
-
-            TimeStampRequestGenerator tsprg = new TimeStampRequestGenerator();
-            tsprg.SetCertReq(true);
-            return tsprg.Generate(digestOid, hash);
-        }
-
+        private Rfc3161TimestampRequest CreateRfc3161RequestBody(byte[] hash, string digestMethod)
+            => Rfc3161TimestampRequest.CreateFromHash(hash, CryptoEncoding.HashName(ToDigestOid(digestMethod)), requestSignerCertificates: true);
         private void CheckRfc3161WebResponse(HttpResponseMessage webResponse)
         {
             if (webResponse.StatusCode != HttpStatusCode.OK
@@ -155,23 +148,11 @@ namespace Egelke.EHealth.Client.Pki
             }
         }
 
-        private byte[] ParseRfc3161ResponseBody(byte[] rspBody, TimeStampRequest tspr)
+        private byte[] ParseRfc3161ResponseBody(byte[] body, Rfc3161TimestampRequest request)
         {
-            TimeStampResponse tsResponse = new TimeStampResponse(rspBody);
-            if (trace.Switch.ShouldTrace(TraceEventType.Verbose))
-                trace.TraceData(TraceEventType.Verbose, 0, "retrieved time-stamp response", address.ToString(), Convert.ToBase64String(rspBody));
-
-            try
-            {
-                tsResponse.Validate(tspr);
-            }
-            catch (Exception e)
-            {
-                trace.TraceEvent(TraceEventType.Error, 0, "The time-stamp response does not correspond with the request: {0}", e.Message);
-                throw;
-            }
-
-            return tsResponse.TimeStampToken.GetEncoded();
+            var token = request.ProcessResponse(body, out int consumed);
+            if (consumed != body.Length) throw new CryptographicException("Trailing timestamp response data");
+            return token.GetEncoded();
         }
     }
 }

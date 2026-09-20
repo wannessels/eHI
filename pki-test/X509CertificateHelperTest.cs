@@ -1,11 +1,12 @@
+using CertificateList = Egelke.EHealth.Client.Pki.CertificateRevocationList;
+using BasicOcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+using OcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+using TimeStampToken = System.Security.Cryptography.Pkcs.Rfc3161TimestampToken;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
-using Org.BouncyCastle.Asn1;
-using Org.BouncyCastle.Asn1.Ocsp;
-using Org.BouncyCastle.Asn1.X509;
 using Xunit;
 
 namespace Egelke.EHealth.Client.Pki.Test
@@ -36,14 +37,14 @@ namespace Egelke.EHealth.Client.Pki.Test
         {
             newEid = new X509Certificate2(@"files/eid79021802145-2027.crt");
             newEidIssuer = new X509Certificate2(@"files/Citizen201709.crt");
-            OcspResponse ocspMsg = OcspResponse.GetInstance(Asn1Sequence.GetInstance(File.ReadAllBytes(@"files/eid79021802145-2027.ocsp-rsp")));
-            newEidOcsp = BasicOcspResponse.GetInstance(Asn1Sequence.GetInstance(ocspMsg.ResponseBytes.Response.GetOctets()));
+            OcspResponse ocspMsg = OcspResponse.Parse(File.ReadAllBytes(@"files/eid79021802145-2027.ocsp-rsp"));
+            newEidOcsp = ocspMsg;
 
             oldEid = new X509Certificate2(@"files/eid79021802145.crt");
             oldEidIssuer = new X509Certificate2(@"files/Citizen201204.crt");
-            oldEidOcsp = BasicOcspResponse.GetInstance(Asn1Sequence.GetInstance(File.ReadAllBytes(@"files/eid79021802145.ocsp")));
-            oldEidOcsp2 = BasicOcspResponse.GetInstance(Asn1Sequence.GetInstance(File.ReadAllBytes(@"files/eid79021802145-2.ocsp")));
-            oldEidCrl = CertificateList.GetInstance(Asn1Sequence.GetInstance(File.ReadAllBytes(@"files/eid79021802145.crl")));
+            oldEidOcsp = BasicOcspResponse.Parse(File.ReadAllBytes(@"files/eid79021802145.ocsp"));
+            oldEidOcsp2 = BasicOcspResponse.Parse(File.ReadAllBytes(@"files/eid79021802145-2.ocsp"));
+            oldEidCrl = CertificateList.Parse(File.ReadAllBytes(@"files/eid79021802145.crl"));
         }
 
 
@@ -93,7 +94,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             BasicOcspResponse result = target.Verify(issuer, new DateTime(2014, 3, 4, 0, 0, 0, DateTimeKind.Utc), revocationInfo);
 
             Assert.NotNull(result);
-            Assert.Equal(new DateTime(2014, 3, 5, 20, 41, 18, DateTimeKind.Utc), result.TbsResponseData.ProducedAt.ToDateTime());
+            Assert.Equal(new DateTime(2014, 3, 5, 20, 41, 18, DateTimeKind.Utc), result.ProducedAt);
         }
 
         [Fact]
@@ -107,7 +108,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             BasicOcspResponse result = target.Verify(issuer, new DateTime(2014, 3, 4, 0, 0, 0, DateTimeKind.Utc), revocationInfo);
 
             Assert.NotNull(result);
-            Assert.Equal(new DateTime(2014, 3, 5, 18, 12, 19, DateTimeKind.Utc), result.TbsResponseData.ProducedAt.ToDateTime());
+            Assert.Equal(new DateTime(2014, 3, 5, 18, 12, 19, DateTimeKind.Utc), result.ProducedAt);
         }
 
         [Fact]
@@ -117,7 +118,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             var issuer = newEidIssuer;
 
             OcspResponse ocspMsg = target.GetOcspResponse(issuer);
-            BasicOcspResponse liveOcsp = BasicOcspResponse.GetInstance(Asn1Object.FromByteArray(ocspMsg.ResponseBytes.Response.GetOctets()));
+            BasicOcspResponse liveOcsp = ocspMsg;
 
             var revocationInfo = new List<BasicOcspResponse>();
             revocationInfo.Add(liveOcsp);
@@ -126,7 +127,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             BasicOcspResponse result = target.Verify(issuer, DateTime.UtcNow, revocationInfo);
 
             Assert.NotNull(result);
-            Assert.Equal(DateTime.UtcNow.Floor(), result.TbsResponseData.ProducedAt.ToDateTime().Floor());
+            Assert.Equal(DateTime.UtcNow.Floor(), result.ProducedAt.Floor());
         }
 
         [Fact]
@@ -155,7 +156,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             CertificateList result = target.Verify(issuer, new DateTime(2016, 6, 16, 8, 14, 8, DateTimeKind.Utc), revocationInfo);
 
             Assert.NotNull(result);
-            Assert.Equal(new DateTime(2018, 7, 16, 8, 14, 8, DateTimeKind.Utc), result.ThisUpdate.ToDateTime());
+            Assert.Equal(new DateTime(2018, 7, 16, 8, 14, 8, DateTimeKind.Utc), result.ThisUpdate);
         }
 
         [Fact]
@@ -172,7 +173,7 @@ namespace Egelke.EHealth.Client.Pki.Test
 
             Assert.Equal("The certificate was revoked on 2017-04-27T17:05:15.0000000Z", result.Message);
             Assert.NotNull(result.RevocationInfo);
-            Assert.Equal(new DateTime(2018, 7, 16, 8, 14, 8, DateTimeKind.Utc), result.RevocationInfo.ThisUpdate.ToDateTime());
+            Assert.Equal(new DateTime(2018, 7, 16, 8, 14, 8, DateTimeKind.Utc), result.RevocationInfo.ThisUpdate);
         }
 
         [Fact]
@@ -192,11 +193,10 @@ namespace Egelke.EHealth.Client.Pki.Test
             var issuer = newEidIssuer;
 
             OcspResponse result = target.GetOcspResponse(issuer);
-            BasicOcspResponse resultDetail = BasicOcspResponse.GetInstance(Asn1Object.FromByteArray(result.ResponseBytes.Response.GetOctets()));
+            BasicOcspResponse resultDetail = result;
 
             Assert.NotNull(result);
-            Assert.Equal(0, result.ResponseStatus.IntValueExact);
-            Assert.Equal(resultDetail.TbsResponseData.ProducedAt.ToDateTime().Floor(), DateTime.UtcNow.Floor());
+            Assert.Equal(resultDetail.ProducedAt.Floor(), DateTime.UtcNow.Floor());
         }
 
         [Fact]
@@ -206,11 +206,10 @@ namespace Egelke.EHealth.Client.Pki.Test
             var issuer = newEidIssuer;
 
             OcspResponse result = await target.GetOcspResponseAsync(issuer);
-            BasicOcspResponse resultDetail = BasicOcspResponse.GetInstance(Asn1Object.FromByteArray(result.ResponseBytes.Response.GetOctets()));
+            BasicOcspResponse resultDetail = result;
 
             Assert.NotNull(result);
-            Assert.Equal(0, result.ResponseStatus.IntValueExact);
-            Assert.Equal(resultDetail.TbsResponseData.ProducedAt.ToDateTime().Floor(), DateTime.UtcNow.Floor());
+            Assert.Equal(resultDetail.ProducedAt.Floor(), DateTime.UtcNow.Floor());
         }
 
         [Fact]
@@ -239,11 +238,10 @@ namespace Egelke.EHealth.Client.Pki.Test
             var issuer = new X509Certificate2(@"files/sentigoCA.cer");
 
             OcspResponse result = target.GetOcspResponse(issuer);
-            BasicOcspResponse resultDetail = BasicOcspResponse.GetInstance(Asn1Object.FromByteArray(result.ResponseBytes.Response.GetOctets()));
+            BasicOcspResponse resultDetail = result;
 
             Assert.NotNull(result);
-            Assert.Equal(0, result.ResponseStatus.IntValueExact);
-            Assert.True(resultDetail.TbsResponseData.ProducedAt.ToDateTime() <= DateTime.UtcNow);
+            Assert.True(resultDetail.ProducedAt <= DateTime.UtcNow);
         }
         */
 
@@ -265,8 +263,8 @@ namespace Egelke.EHealth.Client.Pki.Test
             CertificateList result = target.GetCertificateList();
 
             Assert.NotNull(result);
-            Assert.True(result.ThisUpdate.ToDateTime() <= DateTime.UtcNow);
-            Assert.True(result.NextUpdate.ToDateTime() >= DateTime.UtcNow);
+            Assert.True(result.ThisUpdate <= DateTime.UtcNow);
+            Assert.True(result.NextUpdate.Value >= DateTime.UtcNow);
         }
 
         [Fact]
@@ -277,8 +275,8 @@ namespace Egelke.EHealth.Client.Pki.Test
             CertificateList result = await target.GetCertificateListAsync();
 
             Assert.NotNull(result);
-            Assert.True(result.ThisUpdate.ToDateTime() <= DateTime.UtcNow);
-            Assert.True(result.NextUpdate.ToDateTime() >= DateTime.UtcNow);
+            Assert.True(result.ThisUpdate <= DateTime.UtcNow);
+            Assert.True(result.NextUpdate.Value >= DateTime.UtcNow);
         }
 
         [Fact]
@@ -289,8 +287,8 @@ namespace Egelke.EHealth.Client.Pki.Test
             CertificateList result = target.GetCertificateList();
 
             Assert.NotNull(result);
-            Assert.True(result.ThisUpdate.ToDateTime() <= DateTime.UtcNow);
-            Assert.True(result.NextUpdate.ToDateTime() >= DateTime.UtcNow);
+            Assert.True(result.ThisUpdate <= DateTime.UtcNow);
+            Assert.True(result.NextUpdate.Value >= DateTime.UtcNow);
         }
 
 

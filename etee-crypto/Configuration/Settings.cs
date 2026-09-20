@@ -71,9 +71,13 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         /// </remarks>
         public int SignRetries { get; set; }
 
-        /// <summary>Use platform RSA-PSS/SHA-256 signing instead of managed BouncyCastle RSA. Off by default.</summary>
-        /// <remarks>Captured when a sealer is created. The key provider must support PSS; there is no algorithm downgrade.</remarks>
-        public bool UseNativeRsaPss { get; set; }
+        /// <summary>Compatibility shim: RSA-PSS now always uses platform cryptography.</summary>
+        [Obsolete("Platform cryptography is always enabled; the BouncyCastle backend has been removed.")]
+        public bool UseNativeRsaPss
+        {
+            get => true;
+            set { if (!value) throw new NotSupportedException("The BouncyCastle backend has been removed"); }
+        }
 
         private Settings()
         {

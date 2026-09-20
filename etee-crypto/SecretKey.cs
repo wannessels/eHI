@@ -1,4 +1,4 @@
-﻿/*
+/*
  * This file is part of .Net ETEE for eHealth.
  * Copyright (C) 2014 Egelke
  * 
@@ -19,7 +19,6 @@
 using System;
 using System.Linq;
 using System.Numerics;
-using Org.BouncyCastle.Crypto.Parameters;
 
 namespace Egelke.EHealth.Etee.Crypto
 {
@@ -151,14 +150,6 @@ namespace Egelke.EHealth.Etee.Crypto
            return id.Aggregate(17, (current, b) => current * 31 + b);
         }
 
-        internal KeyParameter BCKey
-        {
-            get
-            {
-                return new KeyParameter(key);
-            }
-        }
-
-        
+        internal byte[] NativeKey => key;
     }
 }

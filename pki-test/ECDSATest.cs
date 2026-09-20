@@ -88,7 +88,7 @@ namespace Egelke.EHealth.Client.Pki.Test
 
             var doc = new XmlDocument();
             doc.PreserveWhitespace = true;
-            doc.Load(@"files\test.xml");
+            doc.Load(@"files/test.xml");
 
             var signedXml = new SignedXml(doc);
             if (privateRsa != null)
@@ -128,7 +128,7 @@ namespace Egelke.EHealth.Client.Pki.Test
         {
             var doc = new XmlDocument();
             doc.PreserveWhitespace = true;
-            doc.Load(@"files\testSigned.xml");
+            doc.Load(@"files/testSigned.xml");
 
             var signedXml = new SignedXml(doc);
             XmlNodeList nodeList = doc.GetElementsByTagName("Signature");

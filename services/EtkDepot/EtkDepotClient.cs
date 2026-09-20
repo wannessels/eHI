@@ -10,7 +10,6 @@ using System.Threading;
 using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Etee.Crypto;
 using Microsoft.Extensions.Logging;
-using Org.BouncyCastle.Asn1.Pkcs;
 
 namespace Egelke.EHealth.Client.Services.EtkDepot
 {
