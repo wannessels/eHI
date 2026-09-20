@@ -22,15 +22,15 @@ internal static class PharmacyProfiles
 {
     private const int RequestBytes = 1024, PrescriptionBytes = 4096;
 
-    internal static async Task<object> RunAsync(int concurrency, int requests, int prescribers, int citizenCrlEntries, int ehealthCrlEntries)
+    internal static async Task<object> RunAsync(int concurrency, int requests, int prescribers, int citizenCrlEntries, int ehealthCrlEntries, bool native)
     {
         if (prescribers < 1) throw new ArgumentOutOfRangeException(nameof(prescribers));
         await using var pki = await EHealthPki.StartAsync(prescribers, citizenCrlEntries, ehealthCrlEntries);
         X509CertificateHelper.CustomTrustStore = pki.Authorities;
         X509CertificateHelper.DisableCertificateDownloads = true;
         RevocationCache.Clear(); ChainCache.Clear();
-        var sealers = new DataSealerFactory(NullLoggerFactory.Instance, true);
-        var unsealers = new DataUnsealerFactory(NullLoggerFactory.Instance, true);
+        var sealers = new DataSealerFactory(NullLoggerFactory.Instance, native);
+        var unsealers = new DataUnsealerFactory(NullLoggerFactory.Instance, native);
         var pharmacySealer = sealers.Create(Level.B_Level, pki.Pharmacy);
         var pharmacyUnsealer = unsealers.Create(Level.B_Level, new X509Certificate2Collection(pki.PharmacyEncryption), new X509Certificate2Collection());
         var prescriptionUnsealer = unsealers.CreateFromTimemarkAuthority(Level.LT_Level, new RecipeTimemark(), new X509Certificate2Collection(), new X509Certificate2Collection());
@@ -79,7 +79,7 @@ internal static class PharmacyProfiles
             return new
             {
                 Method = "Closed-loop pharmacy workers: seal a request to Recip-e, unseal the Recip-e response, unseal the time-marked prescription with its KGSS key at LT level. Chains: root > government > eHealth-platform CA (pharmacy, Recip-e), root > Citizen CA (prescribers). CRLs from an in-process HTTP server, no OCSP responder, no live eHealth endpoints.",
-                Prescribers = prescribers, RequestBytes, PrescriptionBytes,
+                Backend = native ? "native" : "bouncycastle", Prescribers = prescribers, RequestBytes, PrescriptionBytes,
                 CitizenCrlEntries = citizenCrlEntries, CitizenCrlBytes = pki.CitizenCrl.LongLength, CitizenCrlParseMs = ParseMs(pki.CitizenCrl),
                 EHealthCrlEntries = ehealthCrlEntries, EHealthCrlBytes = pki.EHealthCrl.LongLength,
                 CommittedCitizenCrl = CommittedCitizenCrl(), ColdFirstRequestMs = coldMs, Rounds = rounds
