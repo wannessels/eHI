@@ -56,6 +56,8 @@ namespace Egelke.EHealth.Client.Security
 
         private static readonly ConditionalWeakTable<IMemoryCache, AsyncSingleFlight<string, SecurityToken>> flights = new ConditionalWeakTable<IMemoryCache, AsyncSingleFlight<string, SecurityToken>>();
 
+        private static readonly ConditionalWeakTable<X509Certificate2, GenericXmlSecurityToken> x509Tokens = new ConditionalWeakTable<X509Certificate2, GenericXmlSecurityToken>();
+
         /// <summary>
         /// Default constructor.
         /// </summary>
@@ -104,10 +106,13 @@ namespace Egelke.EHealth.Client.Security
         /// </summary>
         /// <remarks>
         /// WCF has excelent build in support for this, but returns a different token type that is internal on certain
-        /// frameworks and can therefor not be used by the custom applied message implementation.
+        /// frameworks and can therefor not be used by the custom applied message implementation. The token is built
+        /// once per certificate and shared by every provider and request.
         /// </remarks>
         /// <returns>The generic xml version of the token</returns>
-        protected SecurityToken CreateX509CertificateToken()
+        protected SecurityToken CreateX509CertificateToken() => x509Tokens.GetValue(_idCert, BuildX509CertificateToken);
+
+        private GenericXmlSecurityToken BuildX509CertificateToken(X509Certificate2 certificate)
         {
             String id = "urn:uuid:" + Guid.NewGuid().ToString();
 
@@ -123,7 +128,7 @@ namespace Egelke.EHealth.Client.Security
             XmlAttribute bstEncodingType = doc.CreateAttribute("EncodingType");
             bstEncodingType.Value = WSS.NS + "#Base64Binary";
             bst.Attributes.Append(bstEncodingType);
-            XmlText bstValue = doc.CreateTextNode(Convert.ToBase64String(_idCert.RawData));
+            XmlText bstValue = doc.CreateTextNode(Convert.ToBase64String(certificate.RawData));
             bst.AppendChild(bstValue);
 
             XmlElement str = doc.CreateElement(_wss.SecExtPrefix, "SecurityTokenReference", WSS.SECEXT10_NS);
@@ -138,9 +143,9 @@ namespace Egelke.EHealth.Client.Security
 
             return new GenericXmlSecurityToken(
                 bst,
-                new X509SecurityToken(_idCert),
-                _idCert.NotBefore.ToUniversalTime(),
-                _idCert.NotAfter.ToUniversalTime(),
+                new X509SecurityToken(certificate),
+                certificate.NotBefore.ToUniversalTime(),
+                certificate.NotAfter.ToUniversalTime(),
                 new GenericXmlSecurityKeyIdentifierClause(str),
                 null,
                 null

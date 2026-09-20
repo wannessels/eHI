@@ -25,6 +25,8 @@ using System.Security.Cryptography.Xml;
 using System.ServiceModel.Security;
 using System.Xml;
 using System.IdentityModel.Tokens;
+using System.Runtime.CompilerServices;
+using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Client.Pki.ECDSA;
 
 namespace Egelke.EHealth.Client.Helper
@@ -61,6 +63,11 @@ namespace Egelke.EHealth.Client.Helper
         internal static string SECEXT11_NS =
             "http://docs.oasis-open.org/wss/oasis-wss-wssecurity-secext-1.1.xsd";
         
+
+        private static readonly ConditionalWeakTable<X509Certificate2, SigningKeyPool> signingKeys = new ConditionalWeakTable<X509Certificate2, SigningKeyPool>();
+
+        private static SigningKeyPool SigningKeys(X509Certificate2 certificate) => signingKeys.GetValue(certificate, value => new SigningKeyPool(() =>
+            (AsymmetricAlgorithm)value.GetRSAPrivateKey() ?? value.GetECDsaPrivateKey() ?? throw new ArgumentException("Certificate key unsupported", nameof(certificate)), SigningKeyPool.DefaultLimit));
 
         /// <summary>
         /// Creats the proper instance based on the spec version.
@@ -187,28 +194,26 @@ namespace Egelke.EHealth.Client.Helper
             sec.AppendChild(tokenXml);
 
             var signedDoc = new CustomSignedXml(doc);
-            AsymmetricAlgorithm signingKey = proofToken.Certificate.GetRSAPrivateKey();
-            if (signingKey != null)
+            using (var lease = SigningKeys(proofToken.Certificate).Rent(OperationScope.Cancellation))
             {
-                signedDoc.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
-            }
-            else
-            {
-                signingKey = proofToken.Certificate.GetECDsaPrivateKey();
-                if (signingKey == null) throw new ArgumentException("Certificate key unsupported", nameof(proofToken.Certificate));
-                ECDSAConfig.Init();  //ensure that we can sign with ECDSA
-                signedDoc.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256";
-            }
-            using (signingKey)
-            {
-                signedDoc.SigningKey = signingKey;
+                if (lease.Key is RSA)
+                {
+                    signedDoc.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+                }
+                else
+                {
+                    ECDSAConfig.Init();  //ensure that we can sign with ECDSA
+                    signedDoc.SignedInfo.SignatureMethod = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256";
+                }
+                signedDoc.SigningKey = lease.Key;
                 signedDoc.SignedInfo.CanonicalizationMethod = SignedXml.XmlDsigExcC14NTransformUrl;
                 AddReferences(signedDoc, signParts, tsId.Value, bodyId, token.Id);
 
                 var keyIdClause = token.CreateKeyIdentifierClause<GenericXmlSecurityKeyIdentifierClause>();
                 signedDoc.KeyInfo.AddClause(new CustomKeyInfoClause(keyIdClause));
 
-                signedDoc.ComputeSignature();
+                try { signedDoc.ComputeSignature(); }
+                catch (CryptographicException) { signingKeys.Remove(proofToken.Certificate); throw; }  // a removed smart card invalidates its handles
             }
             XmlNode signature = signedDoc.GetXml();
             signature = doc.ImportNode(signature, true);

@@ -21,6 +21,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using Egelke.EHealth.Client.Pki;
 
 namespace Egelke.EHealth.Etee.Crypto.Configuration
 {
@@ -67,10 +68,10 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         public long InMemorySize { get; set; }
 
         /// <summary>
-        /// Maximum private-key handles opened per signing certificate or WebKey, so concurrent seals sign in parallel; handles open on demand.
-        /// Defaults to the processor count. Set 1 for keys that cannot be used concurrently, such as smart cards.
+        /// Maximum private-key handles opened per signing certificate or WebKey, so concurrent seals and WS-Security requests sign in parallel; handles open on demand.
+        /// Defaults to the processor count. Set 1 for keys that cannot be used concurrently, such as smart cards. Same value as <see cref="SigningKeyPool.DefaultLimit"/>.
         /// </summary>
-        public int SigningKeyHandles { get; set; }
+        public int SigningKeyHandles { get => SigningKeyPool.DefaultLimit; set => SigningKeyPool.DefaultLimit = value; }
 
         /// <summary>
         /// Maximum bytes of freed spool memory kept in the pool for reuse. Defaults to 256 MiB and is read when the pool is first used, so set it at startup.
@@ -112,7 +113,6 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
             TimestampGracePeriod = new TimeSpan(0, 5, 0);
             InMemorySize = long.MaxValue;
             SpoolPoolBytes = 256L * 1024 * 1024;
-            SigningKeyHandles = Environment.ProcessorCount;
             SignRetries = Environment.OSVersion.Platform == PlatformID.Win32NT ? 4 : 0;
         }
     }

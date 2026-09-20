@@ -15,6 +15,7 @@ internal static class KeyProfiles
         await Program.MeasureAsync("keys", "certificate-copy", encoded.Length, 2000, () => { using var copy = new X509Certificate2(certificate); return Task.CompletedTask; });
         await Program.MeasureAsync("keys", "certificate-thumbprint", encoded.Length, 2000, () => { using var copy = new X509Certificate2(certificate); _ = copy.Thumbprint; return Task.CompletedTask; });
         await Program.MeasureAsync("keys", "public-key-from-certificate", publicKey.Length, 2000, () => { using var key = certificate.GetRSAPublicKey(); return Task.CompletedTask; });
+        await Program.MeasureAsync("keys", "private-key-from-certificate", publicKey.Length, 2000, () => { using var key = certificate.GetRSAPrivateKey(); return Task.CompletedTask; });
         await Program.MeasureAsync("keys", "public-key-import-rsa", publicKey.Length, 2000, () => { using var key = RSA.Create(); key.ImportRSAPublicKey(publicKey, out _); return Task.CompletedTask; });
         await Program.MeasureAsync("keys", "public-key-import-parameters", publicKey.Length, 2000, () => { using var key = RSA.Create(); key.ImportParameters(parameters); return Task.CompletedTask; });
         await Program.MeasureAsync("keys", "verify-hash", hash.Length, 2000, () =>
