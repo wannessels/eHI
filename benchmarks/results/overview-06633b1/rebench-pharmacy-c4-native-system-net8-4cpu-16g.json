@@ -1,0 +1,115 @@
+{
+  "metadata": {
+    "StartedUtc": "2026-09-20T21:01:40.1144831Z",
+    "SourceCommit": "06633b13b1035620c6b75e20de5942158523d230",
+    "Framework": ".NET 8.0.31",
+    "OS": "Debian GNU/Linux 12 (bookworm)",
+    "Architecture": "X64",
+    "ProcessorCount": 4,
+    "Cpu": "model name\t: AMD Ryzen 7 PRO 4750U with Radeon Graphics",
+    "CpuLimit": "400000 100000",
+    "MemoryLimit": "17179869184",
+    "ServerGC": false,
+    "TieredCompilation": "runtime-default",
+    "WarmupOperationsPerScenario": 5,
+    "Quick": false,
+    "Rounds": 3,
+    "Notes": "Release, warmed scenarios; process-wide allocations include server allocations for HTTP; peak working set is cumulative. Local Docker is not AWS Fargate."
+  },
+  "results": [],
+  "httpDetails": null,
+  "concurrencyDetails": null,
+  "pharmacyDetails": {
+    "Method": "Closed-loop pharmacy workers: seal a request to Recip-e, unseal the Recip-e response, unseal the time-marked prescription with its KGSS key at LT level. Chains: root \u003E government \u003E eHealth-platform CA (pharmacy, Recip-e), root \u003E Citizen CA (prescribers). CRLs from an in-process HTTP server, no OCSP responder, no live eHealth endpoints.",
+    "Backend": "native",
+    "Trust": "system",
+    "Prescribers": 16,
+    "RequestBytes": 1024,
+    "PrescriptionBytes": 4096,
+    "CitizenCrlEntries": 350000,
+    "CitizenCrlBytes": 12250436,
+    "CitizenCrlParseMs": 560.7596,
+    "EHealthCrlEntries": 20000,
+    "EHealthCrlBytes": 700482,
+    "CommittedCitizenCrl": {
+      "Path": "pki-test/files/eid79021802145.crl",
+      "Bytes": 12263364,
+      "ParseMs": 507.9244
+    },
+    "ColdFirstRequestMs": 848.7682,
+    "Rounds": [
+      {
+        "Round": 1,
+        "Concurrency": 4,
+        "PeakActiveRequests": 4,
+        "Requests": 64,
+        "MeanMs": 16.906812499999997,
+        "P50Ms": 16.012,
+        "P95Ms": 25.9118,
+        "RequestsPerSecond": 232.98864362384714,
+        "AllocatedBytesPerRequest": 608705.875,
+        "CpuMsPerRequest": 15.625,
+        "Gen2": 0,
+        "ProcessPeakWorkingSet": 382672896,
+        "Details": {
+          "CrlDownloads": 4,
+          "RevocationCacheEntries": 4,
+          "RevocationCacheEstimatedBytes": 60317190,
+          "ChainCacheEntries": 0,
+          "ChainCacheHits": 0,
+          "ChainCacheMisses": 312,
+          "CertificateCacheEntries": 21,
+          "PublicKeyCacheEntries": 19
+        }
+      },
+      {
+        "Round": 2,
+        "Concurrency": 4,
+        "PeakActiveRequests": 4,
+        "Requests": 64,
+        "MeanMs": 16.143770312500003,
+        "P50Ms": 15.3247,
+        "P95Ms": 21.2097,
+        "RequestsPerSecond": 246.39588272479966,
+        "AllocatedBytesPerRequest": 564260.125,
+        "CpuMsPerRequest": 15.46875,
+        "Gen2": 0,
+        "ProcessPeakWorkingSet": 382672896,
+        "Details": {
+          "CrlDownloads": 4,
+          "RevocationCacheEntries": 4,
+          "RevocationCacheEstimatedBytes": 60317190,
+          "ChainCacheEntries": 0,
+          "ChainCacheHits": 0,
+          "ChainCacheMisses": 568,
+          "CertificateCacheEntries": 21,
+          "PublicKeyCacheEntries": 19
+        }
+      },
+      {
+        "Round": 3,
+        "Concurrency": 4,
+        "PeakActiveRequests": 4,
+        "Requests": 64,
+        "MeanMs": 18.0247390625,
+        "P50Ms": 16.4908,
+        "P95Ms": 28.1236,
+        "RequestsPerSecond": 217.5015327061133,
+        "AllocatedBytesPerRequest": 559947.5,
+        "CpuMsPerRequest": 17.8125,
+        "Gen2": 0,
+        "ProcessPeakWorkingSet": 382672896,
+        "Details": {
+          "CrlDownloads": 4,
+          "RevocationCacheEntries": 4,
+          "RevocationCacheEstimatedBytes": 60317190,
+          "ChainCacheEntries": 0,
+          "ChainCacheHits": 0,
+          "ChainCacheMisses": 824,
+          "CertificateCacheEntries": 21,
+          "PublicKeyCacheEntries": 19
+        }
+      }
+    ]
+  }
+}

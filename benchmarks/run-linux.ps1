@@ -11,6 +11,7 @@ param(
     [ValidateRange(0, 10000000)][int]$CitizenCrlEntries = 350000,
     [ValidateRange(0, 10000000)][int]$EHealthCrlEntries = 20000,
     [ValidateSet('native', 'bouncycastle')][string]$Backend = 'native',
+    [ValidateSet('custom', 'system')][string]$Trust = 'custom',
     [switch]$Quick,
     [switch]$ServerGC,
     [switch]$DisableTiering
@@ -25,12 +26,12 @@ if ($Suite -eq 'native-memory') { $profileName = "native-streaming-$($PayloadMiB
 if ($Suite -eq 'crypto-concurrency') { $profileName = "crypto-$($PayloadKiB)kib-c$Concurrency-t$(if ($ThresholdMiB -lt 0) { 'default' } else { $ThresholdMiB })-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
 if ($Suite -eq 'keys') { $profileName = "keys-net8-$($CpuLimit)cpu-$($MemoryGiB)g" }
 if ($Suite -eq 'soap') { $profileName = "soap-net8-$($CpuLimit)cpu-$($MemoryGiB)g" }
-if ($Suite -eq 'pharmacy') { $profileName = "pharmacy-c$Concurrency-p$Prescribers-crl$CitizenCrlEntries$(if ($Backend -eq 'bouncycastle') { '-bc' } else { '' })-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
+if ($Suite -eq 'pharmacy') { $profileName = "pharmacy-c$Concurrency-p$Prescribers-crl$CitizenCrlEntries$(if ($Backend -eq 'bouncycastle') { '-bc' } else { '' })$(if ($Trust -eq 'system') { '-systrust' } else { '' })-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
 if ($ServerGC) { $profileName += '-server' }
 $profileArguments = '--suite ' + $Suite + ' --output /out/' + $profileName + '.json'
 if ($Suite -eq 'native-memory') { $profileArguments += " --payload-mib $PayloadMiB --threshold-mib $ThresholdMiB" }
 if ($Suite -eq 'crypto-concurrency') { $profileArguments += " --payload-kib $PayloadKiB --concurrency $Concurrency --requests $Requests --threshold-mib $ThresholdMiB" }
-if ($Suite -eq 'pharmacy') { $profileArguments += " --concurrency $Concurrency --requests $Requests --prescribers $Prescribers --citizen-crl-entries $CitizenCrlEntries --ehealth-crl-entries $EHealthCrlEntries --backend $Backend" }
+if ($Suite -eq 'pharmacy') { $profileArguments += " --concurrency $Concurrency --requests $Requests --prescribers $Prescribers --citizen-crl-entries $CitizenCrlEntries --ehealth-crl-entries $EHealthCrlEntries --backend $Backend --trust $Trust" }
 if ($Quick) { $profileArguments += ' --quick' }
 $profileCommand = 'cp -a /src /tmp/eHI && cd /tmp/eHI && dotnet build benchmarks/benchmarks.csproj -c Release -p:SignAssembly=false --source https://api.nuget.org/v3/index.json -v quiet > /out/' + $profileName + '-build.log 2>&1 && dotnet benchmarks/bin/Release/net8.0/benchmarks.dll ' + $profileArguments + ' > /out/' + $profileName + '.log 2>&1'
 $profileDockerArguments = @('run', '--rm', '--cpus', "$CpuLimit", '--memory', "$($MemoryGiB)g", '-e', 'DOTNET_CLI_TELEMETRY_OPTOUT=1', '-e', "PROFILE_COMMIT=$profileCommit", '-v', "${profileRepo}:/src:ro", '-v', "${profileOutput}:/out")

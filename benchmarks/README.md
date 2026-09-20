@@ -1,6 +1,6 @@
 # Reproducible performance profiles
 
-The harness measures platform/managed signing primitives and production CMS operations, a standalone stream-pooling prototype, and localhost HTTPS connection reuse. It never calls live eHealth services or installs trust roots.
+The harness measures platform/managed signing primitives and production CMS operations, a standalone stream-pooling prototype, and localhost HTTPS connection reuse. It never calls live eHealth services or changes the host's trust stores. The optional system-trust pharmacy case installs generated authorities only inside a disposable Linux container.
 
 ## Run
 
@@ -25,6 +25,14 @@ The script mounts the repository read-only, builds a disposable copy in the cont
 `-Suite soap` measures the client-side SOAP cost per request that the pharmacy scenario leaves out: WCF serialization of a base64 body alone, and the same message with the WS-Security header (signed timestamp, body and X.509 token, as `EhBinding` applies it) at 4 KiB, 64 KiB and 1 MiB. `-Suite keys` measures the per-object cost of certificate decoding versus handle copies, of the public-key construction paths and of opening a private-key handle and signing with it once on the platform crypto stack. The executable also accepts `--suite crypto|memory|http|native-memory|keys|all`, `--quick`, and `--output path`. Run `-Suite native-memory` in a fresh container/process for an isolated 8 MiB native CMS round trip, or add `-PayloadMiB 32` to check scaling. The executable equivalent is `--suite native-memory --payload-mib 32`. Use `-ThresholdMiB` (executable: `--threshold-mib`) to set `Settings.Default.InMemorySize` for the run; the library default spills above 16 MiB per stream; pass 1 to reproduce the older 1 MiB profiles or a threshold above the payload size for the in-memory profiles. Its process peak working set is not contaminated by earlier payload sizes or the BouncyCastle cases, but includes the benchmark's input byte array. It measures single-operation concurrency, not a concurrency sizing recommendation.
 
 ## Method
+
+The [current overview results](results/overview-06633b1/) contain the fourteen full profiles measured against production commit `06633b1`, including custom/system trust, both crypto backends, payload sizes, signing keys and SOAP. To repeat the same cases with the current checkout, using one pinned Release build and a fresh process per case at 4 CPUs / 16 GiB:
+
+```powershell
+./benchmarks/run-overview-linux.ps1
+```
+
+This batch runs sequentially, leaves its JSON/logs under `artifacts/profiling`, and fails if any profile fails. The system-trust cases run last, after the other cases. The committed JSON files retain the original source commit and measured environment; rerunning does not overwrite them.
 
 Each scenario performs five unmeasured warm-up operations, followed by three measurement rounds. GC is forced between rounds. Reported summaries use the median of the three round means, not a pooled request percentile. Each JSON row retains its own mean, p50/p95, allocations, CPU time and collection counts. Peak working set is cumulative for the process, not a per-case peak. Process-wide allocation measurements include both client and server for HTTP.
 
@@ -65,7 +73,7 @@ Add `-ServerGC` to compare Server GC; the raw metadata records the actual runtim
 ./benchmarks/run-linux.ps1 -Suite pharmacy -CpuLimit 4 -MemoryGiB 4 -Concurrency 4 -Requests 64 -CitizenCrlEntries 0
 ```
 
-The executable accepts `--suite pharmacy --concurrency 4 --requests 64 --prescribers 16 --citizen-crl-entries 350000 --ehealth-crl-entries 20000 --backend native`; `--backend bouncycastle` (`-Backend bouncycastle` for the script) runs the same scenario on the BouncyCastle streaming backend. Each closed-loop request does what a pharmacy does for one prescription: seal a 1 KiB request to the Recip-e encryption certificate with the pharmacy certificate, unseal the Recip-e response (signed by the Recip-e certificate, encrypted to the pharmacy certificate), and unseal the 4 KiB prescription inside it with its KGSS secret key at LT level, with a time-mark provider standing in for Recip-e. Sixteen prescriber certificates rotate across requests. STS, KGSS and SOAP transport are outside the scenario; the KGSS key exchange has the same shape as the request/response pair.
+The executable accepts `--suite pharmacy --concurrency 4 --requests 64 --prescribers 16 --citizen-crl-entries 350000 --ehealth-crl-entries 20000 --backend native`; `--backend bouncycastle` (`-Backend bouncycastle` for the script) runs the same scenario on the BouncyCastle streaming backend. `--trust system` (`-Trust system`) installs the generated authorities into the disposable container's OS certificate store with `update-ca-certificates` and validates with `CustomTrustStore = null`, so every chain is rebuilt by the platform instead of served from `ChainCache`; the benchmark refuses to do this outside a container. Each closed-loop request does what a pharmacy does for one prescription: seal a 1 KiB request to the Recip-e encryption certificate with the pharmacy certificate, unseal the Recip-e response (signed by the Recip-e certificate, encrypted to the pharmacy certificate), and unseal the 4 KiB prescription inside it with its KGSS secret key at LT level, with a time-mark provider standing in for Recip-e. Sixteen prescriber certificates rotate across requests. STS, KGSS and SOAP transport are outside the scenario; the KGSS key exchange has the same shape as the request/response pair.
 
 Certificates are generated in-process with the shapes of the Belgian hierarchies: pharmacy, Recip-e and encryption certificates chain root > government CA > eHealth-platform CA; prescriber certificates chain root > Citizen CA, like eID signature certificates. An in-process HTTP server serves every CRL and there is no OCSP responder, so each chain validation falls back to CRLs. The Citizen CA list defaults to 350,000 entries, matching the live `eidc201204.crl` (12,263,364 bytes, committed unchanged as `pki-test/files/eid79021802145.crl`). The eHealth-platform CA list defaults to 20,000 entries; that is an assumption, because the live Zetes list was unavailable when this scenario was written. Root and government lists are small.
 

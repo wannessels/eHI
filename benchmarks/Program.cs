@@ -47,7 +47,7 @@ internal static class Program
             if (suite == "crypto-concurrency")
                 concurrencyDetails = await ConcurrentCryptoProfiles.RunAsync(Number("--payload-kib", 8192) * 1024, Number("--concurrency", 4), Number("--requests", Quick ? 8 : 32), Number("--threshold-mib", -1));
             if (suite == "pharmacy")
-                pharmacyDetails = await PharmacyProfiles.RunAsync(Number("--concurrency", 4), Number("--requests", Quick ? 8 : 64), Number("--prescribers", 16), Number("--citizen-crl-entries", 350_000), Number("--ehealth-crl-entries", 20_000), Option("--backend", "native") != "bouncycastle");
+                pharmacyDetails = await PharmacyProfiles.RunAsync(Number("--concurrency", 4), Number("--requests", Quick ? 8 : 64), Number("--prescribers", 16), Number("--citizen-crl-entries", 350_000), Number("--ehealth-crl-entries", 20_000), Option("--backend", "native") != "bouncycastle", Option("--trust", "custom") == "system");
         }
         finally
         {

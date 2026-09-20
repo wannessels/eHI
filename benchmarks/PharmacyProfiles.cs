@@ -22,11 +22,12 @@ internal static class PharmacyProfiles
 {
     private const int RequestBytes = 1024, PrescriptionBytes = 4096;
 
-    internal static async Task<object> RunAsync(int concurrency, int requests, int prescribers, int citizenCrlEntries, int ehealthCrlEntries, bool native)
+    internal static async Task<object> RunAsync(int concurrency, int requests, int prescribers, int citizenCrlEntries, int ehealthCrlEntries, bool native, bool systemTrust)
     {
         if (prescribers < 1) throw new ArgumentOutOfRangeException(nameof(prescribers));
         await using var pki = await EHealthPki.StartAsync(prescribers, citizenCrlEntries, ehealthCrlEntries);
-        X509CertificateHelper.CustomTrustStore = pki.Authorities;
+        if (systemTrust) InstallContainerTrust(pki.Authorities);
+        X509CertificateHelper.CustomTrustStore = systemTrust ? null : pki.Authorities;
         X509CertificateHelper.DisableCertificateDownloads = true;
         RevocationCache.Clear(); ChainCache.Clear(); CertificateCache.Clear(); PublicKeyCache.Clear();
         var sealers = new DataSealerFactory(NullLoggerFactory.Instance, native);
@@ -79,7 +80,7 @@ internal static class PharmacyProfiles
             return new
             {
                 Method = "Closed-loop pharmacy workers: seal a request to Recip-e, unseal the Recip-e response, unseal the time-marked prescription with its KGSS key at LT level. Chains: root > government > eHealth-platform CA (pharmacy, Recip-e), root > Citizen CA (prescribers). CRLs from an in-process HTTP server, no OCSP responder, no live eHealth endpoints.",
-                Backend = native ? "native" : "bouncycastle", Prescribers = prescribers, RequestBytes, PrescriptionBytes,
+                Backend = native ? "native" : "bouncycastle", Trust = systemTrust ? "system" : "custom", Prescribers = prescribers, RequestBytes, PrescriptionBytes,
                 CitizenCrlEntries = citizenCrlEntries, CitizenCrlBytes = pki.CitizenCrl.LongLength, CitizenCrlParseMs = ParseMs(pki.CitizenCrl),
                 EHealthCrlEntries = ehealthCrlEntries, EHealthCrlBytes = pki.EHealthCrl.LongLength,
                 CommittedCitizenCrl = CommittedCitizenCrl(), ColdFirstRequestMs = coldMs, Rounds = rounds
@@ -90,6 +91,18 @@ internal static class PharmacyProfiles
             foreach (var context in new object[] { pharmacySealer, pharmacyUnsealer, prescriptionUnsealer, recipeSealer }) (context as IDisposable)?.Dispose();
             X509CertificateHelper.CustomTrustStore = null;
         }
+    }
+
+    // The generated authorities go into the OS store of the disposable container only, never the host.
+    private static void InstallContainerTrust(X509Certificate2Collection authorities)
+    {
+        if (!OperatingSystem.IsLinux() || !File.Exists("/.dockerenv") || Environment.UserName != "root")
+            throw new InvalidOperationException("System trust runs only as root inside a disposable container");
+        for (int i = 0; i < authorities.Count; i++)
+            File.WriteAllText($"/usr/local/share/ca-certificates/ehi-benchmark-{i}.crt", authorities[i].ExportCertificatePem());
+        using var update = Process.Start(new ProcessStartInfo("update-ca-certificates") { RedirectStandardOutput = true, RedirectStandardError = true })!;
+        string errors = update.StandardError.ReadToEnd(); update.StandardOutput.ReadToEnd(); update.WaitForExit();
+        if (update.ExitCode != 0) throw new InvalidOperationException("update-ca-certificates failed: " + errors);
     }
 
     private static void Check(UnsealSecurityInformation information)
