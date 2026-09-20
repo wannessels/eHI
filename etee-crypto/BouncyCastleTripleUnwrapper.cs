@@ -70,7 +70,8 @@ namespace Egelke.EHealth.Etee.Crypto
                     input.Position = start;
                     signers = new CmsSignedData(NativeCms.Read(input)).GetSignerInfos().GetSigners();
                 }
-                return await VerifyCoreAsync(NativeCms.Decode(metadata.GetEncoded()), sender, outer, provider, (certificate, web) =>
+                byte[] encodedMetadata = metadata.GetEncoded();
+                return await VerifyCoreAsync(NativeCms.Decode(encodedMetadata), sender, outer, provider, (certificate, web) =>
                 {
                     var signer = signers.Single();
                     var key = certificate != null ? DotNetUtilities.FromX509Certificate(certificate).GetPublicKey() : BouncyCms.PublicKey(web);
@@ -79,7 +80,7 @@ namespace Egelke.EHealth.Etee.Crypto
                         if (!signer.Verify(key)) throw new CryptographicException("Invalid CMS signature");
                     }
                     catch (CmsException error) { throw new CryptographicException("Invalid CMS signature", error); }
-                }).ConfigureAwait(false);
+                }, NativeCms.LoadCertificates(NativeCms.CertificateSet(encodedMetadata))).ConfigureAwait(false);
             }
             catch (CmsException error) { throw new InvalidMessageException("Invalid CMS signed message", error); }
         }

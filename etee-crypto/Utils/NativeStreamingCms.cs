@@ -98,6 +98,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             internal SignedCms Metadata;
             internal Dictionary<string, byte[]> Digests;
             internal byte[] EncodedSigners;
+            internal X509Certificate2Collection Certificates;
             internal void Verify(X509Certificate2 certificate, WebKey web)
             {
                 var signer = NativeCms.SingleSigner(Metadata);
@@ -207,13 +208,14 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 await payload.DrainAsync().ConfigureAwait(false);
                 reader.Leave(); reader.Leave();
                 var fields = new List<DerSegments> { DerSegments.Encoded(version), DerSegments.Encoded(algorithms), DerSegments.Constructed(0x30, DerSegments.Encoded(contentType)) };
-                if (reader.HasData && reader.PeekTag() == 0xA0) fields.Add(DerSegments.Encoded(reader.ReadEncoded()));
+                byte[] certificates = null;
+                if (reader.HasData && reader.PeekTag() == 0xA0) { certificates = reader.ReadEncoded(); fields.Add(DerSegments.Encoded(certificates)); }
                 if (reader.HasData && reader.PeekTag() == 0xA1) fields.Add(DerSegments.Encoded(reader.ReadEncoded()));
                 byte[] signers = reader.ReadEncoded(); fields.Add(DerSegments.Encoded(signers));
                 reader.Leave(); reader.Leave(); reader.Leave(); reader.End();
                 byte[] metadata = DerSegments.Constructed(0x30, DerSegments.Encoded(type), DerSegments.Constructed(0xA0, DerSegments.Constructed(0x30, fields.ToArray()))).Encode();
                 var cms = new SignedCms(new ContentInfo(Array.Empty<byte>()), true); cms.Decode(metadata);
-                return new Parsed { Metadata = cms, EncodedSigners = signers, Digests = hashes.ToDictionary(pair => pair.Key, pair => pair.Value.GetHashAndReset()) };
+                return new Parsed { Metadata = cms, EncodedSigners = signers, Certificates = NativeCms.LoadCertificates(certificates), Digests = hashes.ToDictionary(pair => pair.Key, pair => pair.Value.GetHashAndReset()) };
             }
             catch (Exception error) when (error is AsnContentException || error is CryptographicException)
             { throw new InvalidMessageException("Invalid CMS signed message", error); }

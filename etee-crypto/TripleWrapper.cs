@@ -107,7 +107,7 @@ namespace Egelke.EHealth.Etee.Crypto
             ObjectDisposedException.ThrowIf(disposed != 0, this);
             using var content = new CryptoSpool(CryptoSpool.Remaining(data));
             var detached = await NativeStreamingCms.ReadAsync(data, content).ConfigureAwait(false);
-            var key = await CompleteCoreAsync(detached.Metadata, null, level).ConfigureAwait(false);
+            var key = await CompleteCoreAsync(detached.Metadata, null, level, detached.Certificates).ConfigureAwait(false);
             content.Position = 0;
             var output = new CryptoSpool(content.Length);
             try { await NativeCms.Attach(detached.Metadata, content).WriteAsync(output).ConfigureAwait(false); output.Position = 0; return new TimemarkedResult<Stream>(output, key); }
@@ -115,10 +115,10 @@ namespace Egelke.EHealth.Etee.Crypto
         }
         // Operates on signature metadata only. The streaming backend supplies detached CMS,
         // so chain building and unsigned-attribute updates never buffer the payload here.
-        protected async Task<TimemarkKey> CompleteCoreAsync(SignedCms cms, X509Certificate2 provided, Level? requested)
+        protected async Task<TimemarkKey> CompleteCoreAsync(SignedCms cms, X509Certificate2 provided, Level? requested, X509Certificate2Collection certificates = null)
         {
             var signer = NativeCms.SingleSigner(cms);
-            var certificates = cms.Certificates;
+            certificates ??= cms.Certificates;
             var certificate = NativeCms.FindSigner(cms, certificates) ?? provided;
             var key = new TimemarkKey { Signer = certificate, SignerId = certificate != null ? CryptoEncoding.SubjectKeyIdentifier(certificate) : NativeCms.KeyId(signer), SigningTime = NativeCms.SigningTime(signer) ?? default, SignatureValue = signer.GetSignature() };
             if (key.SignerId == null) throw new InvalidMessageException("Missing signer identity");

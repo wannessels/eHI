@@ -43,6 +43,25 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             catch (Exception error) when (error is CryptographicException || error is AsnContentException)
             { throw new InvalidMessageException("Invalid CMS signed message", error); }
         }
+        internal static X509Certificate2Collection LoadCertificates(byte[] certificateSet)
+        {
+            var certificates = new X509Certificate2Collection();
+            if (certificateSet == null) return certificates;
+            var set = new AsnReader(certificateSet, AsnEncodingRules.BER).ReadSetOf(true, CryptoEncoding.Context(0));
+            while (set.HasData)
+            {
+                if (set.PeekTag().HasSameClassAndValue(Asn1Tag.Sequence)) certificates.Add(CertificateCache.Load(set.ReadEncodedValue().Span));
+                else set.ReadEncodedValue();
+            }
+            return certificates;
+        }
+        internal static byte[] CertificateSet(byte[] signedData)
+        {
+            var top = CryptoEncoding.Sequence(signedData, AsnEncodingRules.BER); top.ReadObjectIdentifier();
+            var signed = top.ReadSequence(CryptoEncoding.Context(0)).ReadSequence();
+            signed.ReadInteger(); signed.ReadSetOf(true); signed.ReadSequence();
+            return signed.HasData && signed.PeekTag().HasSameClassAndValue(CryptoEncoding.Context(0)) ? signed.ReadEncodedValue().ToArray() : null;
+        }
         internal static SignerInfo SingleSigner(SignedCms cms)
         {
             if (cms.SignerInfos.Count != 1) throw new InvalidMessageException("An eHealth message must contain exactly one signer");

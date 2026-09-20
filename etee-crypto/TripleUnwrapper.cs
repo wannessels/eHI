@@ -57,7 +57,7 @@ namespace Egelke.EHealth.Etee.Crypto
                     inner = await NativeStreamingCms.ReadAsync(encrypted.Content, clear).ConfigureAwait(false);
                     encrypted.Complete();
                 }).ConfigureAwait(false);
-                var outerStatus = await VerifyCoreAsync(outer.Metadata, sender, null, timemark, outer.Verify).ConfigureAwait(false);
+                var outerStatus = await VerifyCoreAsync(outer.Metadata, sender, null, timemark, outer.Verify, outer.Certificates).ConfigureAwait(false);
                 DateTime time = outerStatus.SigningTime ?? DateTime.UtcNow;
                 var certificate = encrypted.SelectCertificate(time);
                 var encryptionStatus = new SecurityInformation { SubjectId = encrypted.KeyId };
@@ -65,7 +65,7 @@ namespace Egelke.EHealth.Etee.Crypto
                     encryptionStatus.Subject = await certificate.VerifyAsync(time, new[] { 2, 3 }, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey, authenticationCertificates, null, null).ConfigureAwait(false);
                 else if (encrypted.KeySize < (key != null ? EteeActiveConfig.Unseal.MinimumEncryptionKeySize.SymmetricRecipientKey : EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey))
                     encryptionStatus.securityViolations.Add(SecurityViolation.NotAllowedEncryptionKeySize);
-                var innerStatus = await VerifyCoreAsync(inner.Metadata, sender, outerStatus, timemark, inner.Verify).ConfigureAwait(false);
+                var innerStatus = await VerifyCoreAsync(inner.Metadata, sender, outerStatus, timemark, inner.Verify, inner.Certificates).ConfigureAwait(false);
                 clear.Position = 0;
                 return new UnsealResult { UnsealedData = clear, SecurityInformation = new UnsealSecurityInformation { OuterSignature = outerStatus, Encryption = encryptionStatus, InnerSignature = innerStatus } };
             }
@@ -82,7 +82,7 @@ namespace Egelke.EHealth.Etee.Crypto
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
             var parsed = await NativeStreamingCms.ReadAsync(data, Stream.Null).ConfigureAwait(false);
-            return await VerifyCoreAsync(parsed.Metadata, sender, null, provider, parsed.Verify).ConfigureAwait(false);
+            return await VerifyCoreAsync(parsed.Metadata, sender, null, provider, parsed.Verify, parsed.Certificates).ConfigureAwait(false);
         }
         public SignatureSecurityInformation Verify(Stream data, DateTime date) => VerifyAsync(data, date).GetAwaiter().GetResult();
         public Task<SignatureSecurityInformation> VerifyAsync(Stream data, DateTime date) => VerifyAsync(data, null, new FixedTimemarkProvider(date));
@@ -99,10 +99,10 @@ namespace Egelke.EHealth.Etee.Crypto
             return new TimemarkedResult<SignatureSecurityInformation>(result, new TimemarkKey { Signer = result.Signer, SignerId = result.SignerId, SigningTime = result.SigningTime.Value, SignatureValue = result.SignatureValue });
         }
         protected async Task<SignatureSecurityInformation> VerifyCoreAsync(SignedCms cms, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider provider,
-            Action<X509Certificate2, WebKey> verifySignature = null)
+            Action<X509Certificate2, WebKey> verifySignature = null, X509Certificate2Collection certificates = null)
         {
-            // SignedCms decodes every embedded certificate on each Certificates access.
-            var certificates = cms.Certificates;
+            // SignedCms decodes every embedded certificate on each Certificates access; callers holding the raw set pass cached copies.
+            certificates ??= cms.Certificates;
             try { return await VerifyLayerAsync(cms, certificates, sender, outer, provider, verifySignature).ConfigureAwait(false); }
             finally { foreach (X509Certificate2 certificate in certificates) certificate.Dispose(); }
         }

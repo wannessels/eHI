@@ -42,6 +42,7 @@ namespace Egelke.EHealth.Client.Pki
             meter.CreateObservableGauge("ehealth.revocation.cache.entries", () => (long)RevocationCache.Count, "{entry}", "Retained revocation evidence entries");
             meter.CreateObservableGauge("ehealth.revocation.cache.bytes", () => RevocationCache.EstimatedSizeBytes, "By", "Estimated memory retained by revocation evidence");
             meter.CreateObservableGauge("ehealth.chain.cache.entries", () => (long)ChainCache.Count, "{entry}", "Retained certificate paths");
+            meter.CreateObservableGauge("ehealth.certificate.cache.entries", () => (long)CertificateCache.Count, "{entry}", "Retained decoded certificates");
         }
         /// <summary>Outcome tag value for a failed operation.</summary>
         public static string Outcome(Exception error) => error is OperationCanceledException ? "cancelled" : "error";
