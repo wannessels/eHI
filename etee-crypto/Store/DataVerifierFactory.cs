@@ -18,6 +18,7 @@
 
 using Egelke.EHealth.Client.Pki;
 using System;
+using Egelke.EHealth.Etee.Crypto.Configuration;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography.X509Certificates;
@@ -40,6 +41,7 @@ namespace Egelke.EHealth.Etee.Crypto.Store
     {
 
         private ILoggerFactory _loggerFactory;
+        private readonly bool? useNativeCrypto;
 
         [Obsolete("Drops all logging, please use the other constructor")]
         public DataVerifierFactory()
@@ -47,9 +49,13 @@ namespace Egelke.EHealth.Etee.Crypto.Store
             _loggerFactory = NullLoggerFactory.Instance;
         }
 
-        public DataVerifierFactory(ILoggerFactory loggerFactory)
+        public DataVerifierFactory(ILoggerFactory loggerFactory) : this(loggerFactory, null) { }
+
+        /// <summary>Creates a factory with an optional fixed backend; null follows Settings.Default at each Create call.</summary>
+        public DataVerifierFactory(ILoggerFactory loggerFactory, bool? useNativeCrypto)
         {
             _loggerFactory = loggerFactory;
+            this.useNativeCrypto = useNativeCrypto;
         }
 
         /// <summary>
@@ -70,7 +76,7 @@ namespace Egelke.EHealth.Etee.Crypto.Store
         /// <returns>The completer of the required level that will verify the message, using the embedded timestamps if needed</returns>
         public IDataVerifier Create(Level? level)
         {
-            return new TripleUnwrapper(level, null, null, null, null, _loggerFactory.CreateLogger<TripleUnwrapper>());
+            return CryptoBackendFactory.Unwrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, null, null, null, null, _loggerFactory);
         }
 
         /// <summary>
@@ -86,7 +92,7 @@ namespace Egelke.EHealth.Etee.Crypto.Store
         {
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time marking");
 
-            return new TripleUnwrapper(level, null, null, null, null, _loggerFactory.CreateLogger<TripleUnwrapper>());
+            return CryptoBackendFactory.Unwrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, null, null, null, null, _loggerFactory);
         }
 
         /// <summary>
@@ -103,7 +109,7 @@ namespace Egelke.EHealth.Etee.Crypto.Store
         {
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time marking");
 
-            return new TripleUnwrapper(level, timemarkAuthority, null, null, null, _loggerFactory.CreateLogger<TripleUnwrapper>());
+            return CryptoBackendFactory.Unwrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, timemarkAuthority, null, null, null, _loggerFactory);
         }
     }
 }

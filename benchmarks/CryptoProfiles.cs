@@ -41,12 +41,15 @@ internal static class CryptoProfiles
                 }
             }
         }
-        foreach (int size in new[] { 32 * 1024, 1024 * 1024, 1024 * 1024 + 1, 8 * 1024 * 1024 })
-            await RoundTripAsync(size, 1024 * 1024, "default-threshold");
-        foreach (int size in new[] { 1024 * 1024, 1024 * 1024 + 1, 8 * 1024 * 1024 })
-            await RoundTripAsync(size, 64 * 1024 * 1024, "memory-threshold");
+        foreach (bool native in new[] { true, false })
+        {
+            foreach (int size in new[] { 32 * 1024, 1024 * 1024, 1024 * 1024 + 1, 8 * 1024 * 1024 })
+                await RoundTripAsync(size, 1024 * 1024, "default-threshold", native);
+            foreach (int size in new[] { 1024 * 1024, 1024 * 1024 + 1, 8 * 1024 * 1024 })
+                await RoundTripAsync(size, 64 * 1024 * 1024, "memory-threshold", native);
+        }
     }
-    private static async Task RoundTripAsync(int size, long threshold, string scenario)
+    private static async Task RoundTripAsync(int size, long threshold, string scenario, bool native)
     {
 
         long previousThreshold = Settings.Default.InMemorySize;
@@ -57,12 +60,12 @@ internal static class CryptoProfiles
             using var key = RSA.Create(2048);
             var sender = new WebKey(key);
             var recipient = new SecretKey(new byte[] { 1, 2, 3 }, RandomNumberGenerator.GetBytes(16));
-            var sealer = new DataSealerFactory(NullLoggerFactory.Instance).Create(Level.B_Level, sender);
-            var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance).Create(null, new X509Certificate2Collection(), new X509Certificate2Collection(), Array.Empty<WebKey>());
+            var sealer = new DataSealerFactory(NullLoggerFactory.Instance, native).Create(Level.B_Level, sender);
+            var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance, native).Create(null, new X509Certificate2Collection(), new X509Certificate2Collection(), Array.Empty<WebKey>());
             var bytes = RandomNumberGenerator.GetBytes(size);
             try
             {
-                await Program.MeasureAsync("cms-roundtrip", $"platform-{scenario}", size, size > 1024 * 1024 ? 12 : 40, async () =>
+                await Program.MeasureAsync("cms-roundtrip", $"{(native ? "platform" : "bouncycastle")}-{scenario}", size, size > 1024 * 1024 ? 12 : 40, async () =>
                 {
                     using var input = new MemoryStream(bytes, false);
                     using var output = await sealer.SealAsync(input, recipient, Array.Empty<EncryptionToken>());

@@ -1,6 +1,6 @@
 # Complete native migration: .NET 8 measurements
 
-The production migration removes BouncyCastle completely. It is **not an unqualified performance win**: native CMS/AES is faster for larger messages, but the platform CMS API allocates more memory than the previous streaming implementation.
+This historical snapshot measured the migration that removed BouncyCastle completely. A [selectable streaming backend](native-crypto-migration.md#backend-selection) has since been restored. The original migration was **not an unqualified performance win**: native CMS/AES was faster for larger messages, but the platform CMS API allocated more memory than the previous streaming implementation.
 
 Measured on .NET 8.0.31, Debian 12, Linux x64, one CPU and 1 GiB container memory, workstation GC. Both implementations ran sequentially on the same local Docker host (AMD Ryzen 7 PRO 4750U), using the same pinned SDK image. These are component measurements, not AWS Fargate service-capacity results.
 

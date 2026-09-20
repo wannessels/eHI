@@ -18,10 +18,11 @@ namespace Egelke.EHealth.Etee.Crypto
 {
     internal class TripleUnwrapper : IDataUnsealer, IDataVerifier, ITmaDataVerifier, IDisposable
     {
-        private readonly Level? level;
-        private readonly ITimemarkProvider timemark;
-        private readonly X509Certificate2Collection encryptionCertificates, authenticationCertificates;
-        private readonly WebKey[] ownKeys;
+        protected readonly Level? level;
+        protected readonly ITimemarkProvider timemark;
+        protected readonly X509Certificate2Collection encryptionCertificates, authenticationCertificates;
+        protected readonly WebKey[] ownKeys;
+        protected int disposed;
         private readonly ILogger<TripleUnwrapper> logger;
         internal TripleUnwrapper(Level? level, ITimemarkProvider timemarkauthority, X509Certificate2Collection encCerts, X509Certificate2Collection authCertStore, WebKey[] ownWebKeys, ILogger<TripleUnwrapper> logger = null)
         {
@@ -29,7 +30,11 @@ namespace Egelke.EHealth.Etee.Crypto
             this.level = level; timemark = timemarkauthority; encryptionCertificates = encCerts; authenticationCertificates = authCertStore;
             ownKeys = ownWebKeys ?? Array.Empty<WebKey>(); this.logger = logger;
         }
-        public void Dispose() { if (authenticationCertificates != null) X509CertificateHelper.DisposeAll(authenticationCertificates); }
+        public virtual void Dispose()
+        {
+            if (System.Threading.Interlocked.Exchange(ref disposed, 1) == 0 && authenticationCertificates != null)
+                X509CertificateHelper.DisposeAll(authenticationCertificates);
+        }
         public UnsealResult Unseal(Stream data) => UnsealAsync(data).GetAwaiter().GetResult();
         public UnsealResult Unseal(Stream data, WebKey sender) => UnsealAsync(data, sender).GetAwaiter().GetResult();
         public UnsealResult Unseal(Stream data, SecretKey key) => UnsealAsync(data, key).GetAwaiter().GetResult();
@@ -37,8 +42,10 @@ namespace Egelke.EHealth.Etee.Crypto
         public Task<UnsealResult> UnsealAsync(Stream data) => UnsealAsync(data, null, null);
         public Task<UnsealResult> UnsealAsync(Stream data, WebKey sender) => UnsealAsync(data, sender, null);
         public Task<UnsealResult> UnsealAsync(Stream data, SecretKey key) => UnsealAsync(data, null, key);
-        public Task<UnsealResult> UnsealAsync(Stream data, WebKey sender, SecretKey key) => OperationPolicy.Default.RunAsync(async _ =>
+        public Task<UnsealResult> UnsealAsync(Stream data, WebKey sender, SecretKey key) => OperationPolicy.Default.RunAsync(_ => UnsealCoreAsync(data, sender, key));
+        protected virtual async Task<UnsealResult> UnsealCoreAsync(Stream data, WebKey sender, SecretKey key)
         {
+            ObjectDisposedException.ThrowIf(disposed != 0, this);
             var outer = NativeCms.Decode(NativeCms.Read(data));
             var outerStatus = await VerifyCoreAsync(outer, sender, null, timemark).ConfigureAwait(false);
             var encrypted = NativeEnvelope.Decrypt(outer.ContentInfo.Content, encryptionCertificates, ownKeys, key, outerStatus.SigningTime ?? DateTime.UtcNow);
@@ -56,13 +63,18 @@ namespace Egelke.EHealth.Etee.Crypto
                 return new UnsealResult { UnsealedData = clear, SecurityInformation = new UnsealSecurityInformation { OuterSignature = outerStatus, Encryption = encryptionStatus, InnerSignature = innerStatus } };
             }
             catch { clear.Dispose(); throw; }
-        });
+        }
         public SignatureSecurityInformation Verify(Stream data) => VerifyAsync(data).GetAwaiter().GetResult();
         public SignatureSecurityInformation Verify(Stream data, WebKey sender) => VerifyAsync(data, sender).GetAwaiter().GetResult();
         public Task<SignatureSecurityInformation> VerifyAsync(Stream data) => VerifyAsync(data, (WebKey)null);
         public Task<SignatureSecurityInformation> VerifyAsync(Stream data, WebKey sender) => VerifyAsync(data, sender, timemark);
         private Task<SignatureSecurityInformation> VerifyAsync(Stream data, WebKey sender, ITimemarkProvider provider)
-            => OperationPolicy.Default.RunAsync(_ => VerifyCoreAsync(NativeCms.Decode(NativeCms.Read(data)), sender, null, provider));
+            => OperationPolicy.Default.RunAsync(_ => VerifyMessageAsync(data, sender, provider));
+        protected virtual Task<SignatureSecurityInformation> VerifyMessageAsync(Stream data, WebKey sender, ITimemarkProvider provider)
+        {
+            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            return VerifyCoreAsync(NativeCms.Decode(NativeCms.Read(data)), sender, null, provider);
+        }
         public SignatureSecurityInformation Verify(Stream data, DateTime date) => VerifyAsync(data, date).GetAwaiter().GetResult();
         public Task<SignatureSecurityInformation> VerifyAsync(Stream data, DateTime date) => VerifyAsync(data, null, new FixedTimemarkProvider(date));
         public SignatureSecurityInformation Verify(Stream data, out TimemarkKey key) => Verify(data, null, out key);
@@ -77,7 +89,8 @@ namespace Egelke.EHealth.Etee.Crypto
             if (result.SigningTime == null) throw new InvalidMessageException("Time-mark keys require an embedded signing time");
             return new TimemarkedResult<SignatureSecurityInformation>(result, new TimemarkKey { Signer = result.Signer, SignerId = result.SignerId, SigningTime = result.SigningTime.Value, SignatureValue = result.SignatureValue });
         }
-        private async Task<SignatureSecurityInformation> VerifyCoreAsync(SignedCms cms, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider provider)
+        protected async Task<SignatureSecurityInformation> VerifyCoreAsync(SignedCms cms, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider provider,
+            Action<X509Certificate2, WebKey> verifySignature = null)
         {
             var result = new SignatureSecurityInformation();
             if (cms.SignerInfos.Count == 0) { result.securityViolations.Add(SecurityViolation.NotSigned); return result; }
@@ -103,14 +116,22 @@ namespace Egelke.EHealth.Etee.Crypto
             result.SignatureValue = signer.GetSignature();
             try
             {
-                if (certificate != null) signer.CheckSignature(new X509Certificate2Collection(certificate), true);
+                if (certificate != null)
+                {
+                    if (verifySignature != null) verifySignature(certificate, null);
+                    else signer.CheckSignature(new X509Certificate2Collection(certificate), true);
+                }
                 else
                 {
                     if (sender == null || ski == null || !ski.AsSpan().SequenceEqual(sender.Id)) throw new ArgumentException("The sender WebKey ID does not match", nameof(sender));
                     if (outer != null && !ski.AsSpan().SequenceEqual(outer.SignerId)) result.securityViolations.Add(SecurityViolation.SubjectDoesNotMachEnvelopingSubject);
                     result.SubjectId = ski;
-                    using var carrier = NativeCms.KeyCarrier(sender.NativeKey, sender.Id);
-                    signer.CheckSignature(new X509Certificate2Collection(carrier), true);
+                    if (verifySignature != null) verifySignature(null, sender);
+                    else
+                    {
+                        using var carrier = NativeCms.KeyCarrier(sender.NativeKey, sender.Id);
+                        signer.CheckSignature(new X509Certificate2Collection(carrier), true);
+                    }
                     if (!CertVerifier.VerifyKeySize(sender.NativeKey, EteeActiveConfig.Unseal.MinimumSignatureKeySize)) result.securityViolations.Add(SecurityViolation.UntrustedSubject);
                 }
             }

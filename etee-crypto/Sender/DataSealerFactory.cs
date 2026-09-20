@@ -18,6 +18,7 @@
 
 
 using System;
+using Egelke.EHealth.Etee.Crypto.Configuration;
 using System.Security.Cryptography.X509Certificates;
 using Egelke.EHealth.Client.Pki;
 using System.Security.Cryptography;
@@ -37,6 +38,7 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
     {
 
         private ILoggerFactory _loggerFactory;
+        private readonly bool? useNativeCrypto;
 
         [Obsolete("Drops all logging, please use the other constructor")]
         public DataSealerFactory()
@@ -44,16 +46,20 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
             _loggerFactory = NullLoggerFactory.Instance;
         }
 
-        public DataSealerFactory(ILoggerFactory loggerFactory)
+        public DataSealerFactory(ILoggerFactory loggerFactory) : this(loggerFactory, null) { }
+
+        /// <summary>Creates a factory with an optional fixed backend; null follows Settings.Default at each Create call.</summary>
+        public DataSealerFactory(ILoggerFactory loggerFactory, bool? useNativeCrypto)
         {
             _loggerFactory = loggerFactory;
+            this.useNativeCrypto = useNativeCrypto;
         }
 
         public IDataSealer Create(Level level, WebKey key)
         {
             if ((level & Level.T_Level) == Level.T_Level) throw new NotSupportedException("This method can't create timestamps");
 
-            return new TripleWrapper(level, key, null, _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, key, null, _loggerFactory);
         }
 
         /// <summary>
@@ -68,7 +74,7 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
             ValidateCertificates(authSign, nonRepSign);
             if ((level & Level.T_Level) == Level.T_Level) throw new NotSupportedException("This method can't create timestamps");
 
-            return new TripleWrapper(level, authSign, nonRepSign, null, null, _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, authSign, nonRepSign, null, null, _loggerFactory);
         }
 
         public IDataSealer Create(Level level, ITimestampProvider timestampProvider, WebKey key)
@@ -76,7 +82,7 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
             if (timestampProvider == null) throw new ArgumentNullException("timestampProvider", "A time-stamp provider is required with this method");
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time stamping");
 
-            return new TripleWrapper(level, key, timestampProvider);
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, key, timestampProvider, _loggerFactory);
         }
 
         /// <summary>
@@ -94,14 +100,14 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
             if (timestampProvider == null) throw new ArgumentNullException("timestampProvider", "A time-stamp provider is required with this method");
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time stamping");
 
-            return new TripleWrapper(level, authSign, nonRepSign, timestampProvider, null, _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, authSign, nonRepSign, timestampProvider, null, _loggerFactory);
         }
 
         public IDataSealer CreateForTimemarkAuthority(Level level, WebKey key)
         {
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time marking");
 
-            return new TripleWrapper(level, key, null, _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, key, null, _loggerFactory);
         }
 
         /// <summary>
@@ -117,7 +123,7 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
             ValidateCertificates(authSign, nonRepSign);
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time marking");
 
-            return new TripleWrapper(level, authSign, nonRepSign, null, null, _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, authSign, nonRepSign, null, null, _loggerFactory);
         }
 
 

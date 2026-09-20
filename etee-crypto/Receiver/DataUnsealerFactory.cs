@@ -40,6 +40,7 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
     {
 
         private ILoggerFactory _loggerFactory;
+        private readonly bool? useNativeCrypto;
 
         [Obsolete("Drops all logging, please use the other constructor")]
         public DataUnsealerFactory()
@@ -47,9 +48,13 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
             _loggerFactory = NullLoggerFactory.Instance;
         }
 
-        public DataUnsealerFactory(ILoggerFactory loggerFactory)
+        public DataUnsealerFactory(ILoggerFactory loggerFactory) : this(loggerFactory, null) { }
+
+        /// <summary>Creates a factory with an optional fixed backend; null follows Settings.Default at each Create call.</summary>
+        public DataUnsealerFactory(ILoggerFactory loggerFactory, bool? useNativeCrypto)
         {
             _loggerFactory = loggerFactory;
+            this.useNativeCrypto = useNativeCrypto;
         }
 
         /// <summary>
@@ -63,7 +68,7 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
         public
             IDataUnsealer Create(Level? level, X509Certificate2Collection encCerts, X509Certificate2Collection authCertChains, params WebKey[] ownWebKeys)
         {
-            return new TripleUnwrapper(level, null, encCerts, ToStore(authCertChains), ownWebKeys, _loggerFactory.CreateLogger<TripleUnwrapper>());
+            return CryptoBackendFactory.Unwrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, null, encCerts, ToStore(authCertChains), ownWebKeys, _loggerFactory);
         }
 
         /// <summary>
@@ -119,7 +124,7 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time marking");
             if (timemarkauthority == null) throw new ArgumentNullException("time-mark authority", "This method requires an time-mark authority specified");
 
-            return new TripleUnwrapper(level, timemarkauthority, encCerts, ToStore(authCertChains), ownWebKeys, _loggerFactory.CreateLogger<TripleUnwrapper>());
+            return CryptoBackendFactory.Unwrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, timemarkauthority, encCerts, ToStore(authCertChains), ownWebKeys, _loggerFactory);
         }
 
         /// <summary>

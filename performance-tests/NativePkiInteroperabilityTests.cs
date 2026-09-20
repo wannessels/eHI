@@ -68,11 +68,11 @@ public class NativePkiInteroperabilityTests
     }
 
     [Theory]
-    [InlineData(Level.B_Level)]
-    [InlineData(Level.T_Level)]
-    [InlineData(Level.LT_Level)]
-    [InlineData(Level.LTA_Level)]
-    public async Task CertificateAndTimestampProfilesRoundTripWithPrivateTrustAnchors(Level level)
+    [InlineData(Level.B_Level, true)] [InlineData(Level.B_Level, false)]
+    [InlineData(Level.T_Level, true)] [InlineData(Level.T_Level, false)]
+    [InlineData(Level.LT_Level, true)] [InlineData(Level.LT_Level, false)]
+    [InlineData(Level.LTA_Level, true)] [InlineData(Level.LTA_Level, false)]
+    public async Task CertificateAndTimestampProfilesRoundTripWithPrivateTrustAnchors(Level level, bool native)
     {
         using var server = new PkiFixture.FixtureServer();
         var rootKey = PkiFixture.NewKey(); var root = PkiFixture.MakeCert("CN=Test Root", BigInteger.One, rootKey, null, null);
@@ -85,9 +85,9 @@ public class NativePkiInteroperabilityTests
         var previous = X509CertificateHelper.CustomTrustStore;
         X509CertificateHelper.CustomTrustStore = new X509Certificate2Collection(rootCert);
         RevocationCache.Clear();
-        var factory = new DataSealerFactory(NullLoggerFactory.Instance);
+        var factory = new DataSealerFactory(NullLoggerFactory.Instance, native);
         var sealer = level == Level.B_Level ? factory.Create(level, signingCert) : factory.Create(level, new LocalTimestampProvider(tsa, tsaKey, root), signingCert);
-        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance).Create(level, new X509Certificate2Collection(), new X509Certificate2Collection());
+        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance, native).Create(level, new X509Certificate2Collection(), new X509Certificate2Collection());
         var recipient = new SecretKey(new byte[] { 3 }, RandomNumberGenerator.GetBytes(16));
         try
         {
@@ -101,7 +101,7 @@ public class NativePkiInteroperabilityTests
                 byte[] originalSignature = signed.SignerInfos[0].GetSignature();
                 signed.RemoveCertificate(rootCert); // The completer must not duplicate the remaining signer certificate.
                 using var source = new MemoryStream(signed.Encode());
-                var completer = new DataCompleterFactory(NullLoggerFactory.Instance).Create(level, new LocalTimestampProvider(tsa, tsaKey, root));
+                var completer = new DataCompleterFactory(NullLoggerFactory.Instance, native).Create(level, new LocalTimestampProvider(tsa, tsaKey, root));
                 try { completed = await completer.CompleteAsync(source); }
                 finally { (completer as IDisposable)?.Dispose(); }
                 using var copy = new MemoryStream(); completed.CopyTo(copy); completed.Position = 0;
@@ -127,7 +127,7 @@ public class NativePkiInteroperabilityTests
             if (level == Level.B_Level)
             {
                 output.Position = 0;
-                var verifier = new DataVerifierFactory(NullLoggerFactory.Instance).CreateAsTimemarkAuthority(Level.T_Level);
+                var verifier = new DataVerifierFactory(NullLoggerFactory.Instance, native).CreateAsTimemarkAuthority(Level.T_Level);
                 try
                 {
                     var marked = await verifier.VerifyAsync(output, DateTime.UtcNow);

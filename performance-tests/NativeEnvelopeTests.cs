@@ -22,20 +22,21 @@ using Xunit;
 public class NativeEnvelopeTests
 {
     [Fact]
-    public void ProductionAssembliesHaveNoBouncyCastleReferences()
+    public void PkiAndTransportRemainIndependentOfBouncyCastle()
     {
-        foreach (var assembly in new[] { typeof(EHealthP12).Assembly, typeof(EncryptionToken).Assembly, typeof(EhBinding).Assembly, typeof(MdaClient).Assembly })
+        foreach (var assembly in new[] { typeof(EHealthP12).Assembly, typeof(EhBinding).Assembly, typeof(MdaClient).Assembly })
             Assert.DoesNotContain(assembly.GetReferencedAssemblies(), reference => reference.Name.Contains("BouncyCastle", StringComparison.OrdinalIgnoreCase));
     }
     [Theory]
-    [InlineData(16)] [InlineData(24)] [InlineData(32)]
-    public async Task AllAesKeyWrapSizesInteroperate(int length)
+    [InlineData(16, true)] [InlineData(24, true)] [InlineData(32, true)]
+    [InlineData(16, false)] [InlineData(24, false)] [InlineData(32, false)]
+    public async Task AllAesKeyWrapSizesInteroperate(int length, bool native)
     {
         using var rsa = RSA.Create(2048); var sender = new WebKey(rsa);
         byte[] kek = RandomNumberGenerator.GetBytes(length), payload = RandomNumberGenerator.GetBytes(1024);
         var recipient = new SecretKey(new byte[] { 9 }, kek);
-        var sealer = new DataSealerFactory(NullLoggerFactory.Instance).Create(Level.B_Level, sender);
-        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance).Create(null, new X509Certificate2Collection(), new X509Certificate2Collection(), Array.Empty<WebKey>());
+        var sealer = new DataSealerFactory(NullLoggerFactory.Instance, native).Create(Level.B_Level, sender);
+        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance, native).Create(null, new X509Certificate2Collection(), new X509Certificate2Collection(), Array.Empty<WebKey>());
         try
         {
             using var input = new MemoryStream(payload); using var output = await sealer.SealAsync(input, recipient, Array.Empty<EncryptionToken>()); using var copy = new MemoryStream();
@@ -45,8 +46,9 @@ public class NativeEnvelopeTests
         }
         finally { (sealer as IDisposable)?.Dispose(); (receiver as IDisposable)?.Dispose(); }
     }
-    [Fact]
-    public async Task CertificateRecipientInteroperatesAndWrongExplicitKekDoesNotFallBack()
+    [Theory]
+    [InlineData(true)] [InlineData(false)]
+    public async Task CertificateRecipientInteroperatesAndWrongExplicitKekDoesNotFallBack(bool native)
     {
         var rootKey = PkiFixture.NewKey(); var root = PkiFixture.MakeCert("CN=Root", BigInteger.One, rootKey, null, null);
         var receiverPair = PkiFixture.NewKey(); var receiverCertificate = PkiFixture.MakeCert("CN=Recipient", BigInteger.Two, receiverPair, root, rootKey, keyUsage: 48);
@@ -55,8 +57,8 @@ public class NativeEnvelopeTests
         using var cert = publicCert.CopyWithPrivateKey(receiverKey);
         using var senderKey = RSA.Create(2048); var sender = new WebKey(senderKey);
         var previous = X509CertificateHelper.CustomTrustStore; X509CertificateHelper.CustomTrustStore = new X509Certificate2Collection(rootCert);
-        var sealer = new DataSealerFactory(NullLoggerFactory.Instance).Create(Level.B_Level, sender);
-        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance).Create(null, new X509Certificate2Collection(cert), new X509Certificate2Collection(rootCert), Array.Empty<WebKey>());
+        var sealer = new DataSealerFactory(NullLoggerFactory.Instance, native).Create(Level.B_Level, sender);
+        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance, native).Create(null, new X509Certificate2Collection(cert), new X509Certificate2Collection(rootCert), Array.Empty<WebKey>());
         try
         {
             var data = RandomNumberGenerator.GetBytes(1234);
@@ -73,16 +75,19 @@ public class NativeEnvelopeTests
         }
         finally { (sealer as IDisposable)?.Dispose(); (receiver as IDisposable)?.Dispose(); X509CertificateHelper.CustomTrustStore = previous; }
     }
-    [Fact]
-    public async Task ModifiedSignatureIsNotAcceptedAndTrailingDataIsRejected()
+    [Theory]
+    [InlineData(true)] [InlineData(false)]
+    public async Task ModifiedSignatureIsNotAcceptedAndTrailingDataIsRejected(bool native)
     {
         using var rsa = RSA.Create(2048); var sender = new WebKey(rsa); var secret = new SecretKey(new byte[] { 1 }, RandomNumberGenerator.GetBytes(16));
-        var sealer = new DataSealerFactory(NullLoggerFactory.Instance).Create(Level.B_Level, sender);
-        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance).Create(null, new X509Certificate2Collection(), new X509Certificate2Collection(), Array.Empty<WebKey>());
+        var sealer = new DataSealerFactory(NullLoggerFactory.Instance, native).Create(Level.B_Level, sender);
+        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance, native).Create(null, new X509Certificate2Collection(), new X509Certificate2Collection(), Array.Empty<WebKey>());
         try
         {
             using var input = new MemoryStream(new byte[1024]); using var output = await sealer.SealAsync(input, secret, Array.Empty<EncryptionToken>()); using var copy = new MemoryStream(); output.CopyTo(copy);
-            byte[] original = copy.ToArray(), corrupt = (byte[])original.Clone(); corrupt[corrupt.Length - 1] ^= 1;
+            byte[] original = copy.ToArray();
+            // DER ends in the signature bytes; BER streaming output ends in end-of-content markers.
+            byte[] corrupt = Org.BouncyCastle.Asn1.Asn1Object.FromByteArray(original).GetEncoded("DER"); corrupt[corrupt.Length - 1] ^= 1;
             using var badInput = new MemoryStream(corrupt); var result = await receiver.UnsealAsync(badInput, sender, secret);
             using(result.UnsealedData) Assert.Equal(ValidationStatus.Invalid, result.SecurityInformation.ValidationStatus);
             using var trailing = new MemoryStream(original.Concat(new byte[] { 0 }).ToArray());

@@ -19,6 +19,7 @@
 using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Etee.Crypto.Sender;
 using System;
+using Egelke.EHealth.Etee.Crypto.Configuration;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -45,6 +46,7 @@ namespace Egelke.EHealth.Etee.Crypto.Store
     {
 
         private ILoggerFactory _loggerFactory;
+        private readonly bool? useNativeCrypto;
 
         [Obsolete("Drops all logging, please use the other constructor")]
         public DataCompleterFactory()
@@ -52,9 +54,13 @@ namespace Egelke.EHealth.Etee.Crypto.Store
             _loggerFactory = NullLoggerFactory.Instance;
         }
 
-        public DataCompleterFactory(ILoggerFactory loggerFactory)
+        public DataCompleterFactory(ILoggerFactory loggerFactory) : this(loggerFactory, null) { }
+
+        /// <summary>Creates a factory with an optional fixed backend; null follows Settings.Default at each Create call.</summary>
+        public DataCompleterFactory(ILoggerFactory loggerFactory, bool? useNativeCrypto)
         {
             _loggerFactory = loggerFactory;
+            this.useNativeCrypto = useNativeCrypto;
         }
 
 
@@ -76,7 +82,7 @@ namespace Egelke.EHealth.Etee.Crypto.Store
             if (timestampProvider == null) throw new ArgumentNullException("timestampProvider", "A time-stamp provider is required with this method");
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should be used for a level that requires time stamping");
 
-            return new TripleWrapper(level, null, null, timestampProvider, null, _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, null, null, timestampProvider, null, _loggerFactory);
         }
 
         /// <summary>
@@ -95,7 +101,7 @@ namespace Egelke.EHealth.Etee.Crypto.Store
             if (level == Level.B_Level || level == Level.T_Level) throw new NotSupportedException("Nothing to complete for B-level or T-Level for time-mark authority");
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should be used for a level that requires time stamping");
 
-            return new TripleWrapper(level, null, null, null, null, _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, null, null, null, null, _loggerFactory);
         }
 
         /// <summary>
@@ -112,7 +118,7 @@ namespace Egelke.EHealth.Etee.Crypto.Store
             if (level == Level.B_Level) throw new NotSupportedException("Nothing to complete for B-level");
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time marking");
 
-            return new TripleWrapper(level, null, null, null, null, _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, null, null, null, null, _loggerFactory);
         }
 
     }

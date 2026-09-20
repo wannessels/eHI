@@ -8,7 +8,7 @@ $profileRepo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $profileOutput = Join-Path $profileRepo 'artifacts\profiling'
 New-Item -ItemType Directory -Force -Path $profileOutput | Out-Null
 $profileCommit = git -C $profileRepo rev-parse HEAD
-$profileName = if ($DisableTiering) { 'native-net8-1cpu-1g-no-tiering' } else { 'native-net8-1cpu-1g' }
+$profileName = if ($DisableTiering) { 'backends-net8-1cpu-1g-no-tiering' } else { 'backends-net8-1cpu-1g' }
 $profileArguments = '--suite ' + $Suite + ' --output /out/' + $profileName + '.json'
 if ($Quick) { $profileArguments += ' --quick' }
 $profileCommand = 'cp -a /src /tmp/eHI && cd /tmp/eHI && dotnet build benchmarks/benchmarks.csproj -c Release -p:SignAssembly=false --source https://api.nuget.org/v3/index.json -v quiet > /out/' + $profileName + '-build.log 2>&1 && dotnet benchmarks/bin/Release/net8.0/benchmarks.dll ' + $profileArguments + ' > /out/' + $profileName + '.log 2>&1'

@@ -13,13 +13,14 @@ using Xunit;
 
 public class ConcurrentSigningTests
 {
-    [Fact]
-    public async Task NativeEcdsaSignsIndependentConcurrentMessages()
+    [Theory]
+    [InlineData(true)] [InlineData(false)]
+    public async Task EcdsaSignsIndependentConcurrentMessages(bool native)
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256); var sender = new WebKey(key);
         var recipient = new SecretKey(new byte[] { 1 }, RandomNumberGenerator.GetBytes(16));
-        var sealer = new DataSealerFactory(NullLoggerFactory.Instance).Create(Level.B_Level, sender);
-        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance).Create(null, new X509Certificate2Collection(), new X509Certificate2Collection(), Array.Empty<WebKey>());
+        var sealer = new DataSealerFactory(NullLoggerFactory.Instance, native).Create(Level.B_Level, sender);
+        var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance, native).Create(null, new X509Certificate2Collection(), new X509Certificate2Collection(), Array.Empty<WebKey>());
         try
         {
             await Task.WhenAll(Enumerable.Range(0, 32).Select(i => Task.Run(async () =>

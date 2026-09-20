@@ -71,12 +71,26 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         /// </remarks>
         public int SignRetries { get; set; }
 
-        /// <summary>Compatibility shim: RSA-PSS now always uses platform cryptography.</summary>
-        [Obsolete("Platform cryptography is always enabled; the BouncyCastle backend has been removed.")]
+        private volatile bool useNativeCrypto = true;
+
+        /// <summary>
+        /// Selects native .NET message cryptography (true, the default) or the streaming
+        /// BouncyCastle implementation (false). Factories capture this choice when creating
+        /// a sealer, unsealer, verifier or completer; existing instances keep their implementation.
+        /// Certificate, revocation and timestamp validation remain shared.
+        /// </summary>
+        public bool UseNativeCrypto
+        {
+            get => useNativeCrypto;
+            set => useNativeCrypto = value;
+        }
+
+        /// <summary>Compatibility alias for UseNativeCrypto; now switches the complete message backend.</summary>
+        [Obsolete("Use UseNativeCrypto. This alias now selects the complete message backend, not just RSA-PSS signing.")]
         public bool UseNativeRsaPss
         {
-            get => true;
-            set { if (!value) throw new NotSupportedException("The BouncyCastle backend has been removed"); }
+            get => UseNativeCrypto;
+            set => UseNativeCrypto = value;
         }
 
         private Settings()

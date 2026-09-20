@@ -16,6 +16,7 @@ using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Client.Services.EtkDepot;
 using Egelke.EHealth.Client.Sts;
 using Egelke.EHealth.Etee.Crypto;
+using Egelke.EHealth.Etee.Crypto.Configuration;
 using Egelke.EHealth.Etee.Crypto.Receiver;
 using Egelke.EHealth.Etee.Crypto.Sender;
 using Egelke.EHealth.Etee.Crypto.Status;
@@ -46,12 +47,10 @@ namespace Egelke.EHealth.Client.Services
             }
         }
 
-        private readonly ResourceCache<Tuple<Level, X509Certificate2>, IDataSealer> sealers =
-            new ResourceCache<Tuple<Level, X509Certificate2>, IDataSealer>((a, b) => a.Item1 == b.Item1 && ReferenceEquals(a.Item2, b.Item2));
-        private readonly ResourceCache<EHealthP12[], IDataUnsealer> unsealers =
-            new ResourceCache<EHealthP12[], IDataUnsealer>((a, b) => a.Length == b.Length && a.Zip(b, ReferenceEquals).All(equal => equal));
-        private readonly DataSealerFactory sealerFactory = new DataSealerFactory(NullLoggerFactory.Instance);
-        private readonly DataUnsealerFactory unsealerFactory = new DataUnsealerFactory(NullLoggerFactory.Instance);
+        private readonly ResourceCache<Tuple<Level, X509Certificate2, bool>, IDataSealer> sealers =
+            new ResourceCache<Tuple<Level, X509Certificate2, bool>, IDataSealer>((a, b) => a.Item1 == b.Item1 && ReferenceEquals(a.Item2, b.Item2) && a.Item3 == b.Item3);
+        private readonly ResourceCache<Tuple<EHealthP12[], bool>, IDataUnsealer> unsealers =
+            new ResourceCache<Tuple<EHealthP12[], bool>, IDataUnsealer>((a, b) => a.Item2 == b.Item2 && a.Item1.Length == b.Item1.Length && a.Item1.Zip(b.Item1, ReferenceEquals).All(equal => equal));
 
         public static ServiceClient<Port> Create(EHealthP12 store, Binding binding, EndpointAddress remoteAddress, ILogger<ServiceClient<Port>> logger = null)
         {
@@ -231,8 +230,8 @@ namespace Egelke.EHealth.Client.Services
                         _logger.LogDebug("encrypted content: {0}", reader.ReadToEnd());
                     clearStream.Position = position;
                 }
-                using (var lease = sealers.Acquire(Tuple.Create(level, ClientCredentials.ClientCertificate.Certificate),
-                    identity => sealerFactory.Create(identity.Item1, identity.Item2)))
+                using (var lease = sealers.Acquire(Tuple.Create(level, ClientCredentials.ClientCertificate.Certificate, Settings.Default.UseNativeCrypto),
+                    identity => new DataSealerFactory(NullLoggerFactory.Instance, identity.Item3).Create(identity.Item1, identity.Item2)))
                 using (Stream cypherStream = await lease.Value.SealAsync(clearStream, recepients).ConfigureAwait(false))
                 {
                     return ToByteArray(cypherStream);
@@ -259,7 +258,8 @@ namespace Egelke.EHealth.Client.Services
         {
             UnsealResult result;
             var stores = new[] { Store }.Concat(ExpiredStores).ToArray();
-            using (var lease = unsealers.Acquire(stores, identity => unsealerFactory.Create(Level.B_Level, identity)))
+            using (var lease = unsealers.Acquire(Tuple.Create(stores, Settings.Default.UseNativeCrypto),
+                identity => new DataUnsealerFactory(NullLoggerFactory.Instance, identity.Item2).Create(Level.B_Level, identity.Item1)))
             using (Stream cypherStream = new MemoryStream(cypherText))
             {
                 result = await lease.Value.UnsealAsync(cypherStream).ConfigureAwait(false);

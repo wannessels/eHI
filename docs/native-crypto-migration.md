@@ -1,8 +1,27 @@
 # Native cryptography migration (.NET 8)
 
-The production libraries now target **.NET 8** and have no direct or transitive BouncyCastle dependency. RSA/ECDSA signatures, signature verification, AES-CBC, AES key wrapping, CMS, PKCS#12 and RFC 3161 timestamp operations use .NET cryptographic APIs. CRL/OCSP and eHealth CMS envelope fields are decoded with `System.Formats.Asn1`; their cryptographic operations use platform providers.
+The production libraries target **.NET 8**. Native .NET message cryptography is the default, with a selectable BouncyCastle streaming backend. Public interfaces retain the native migration's PKI types; switching the backend does not change the API or wire format.
 
-BouncyCastle remains only in test fixtures/interoperability oracles and the comparison benchmark project. The Java interoperability test project also retains its independent Java implementation. Neither is shipped as a production library dependency.
+BouncyCastle.Cryptography is a production dependency of `etee-crypto` again, including when native mode is selected. PKI and transport libraries do not directly reference it. The Java interoperability test project retains its independent implementation.
+
+## Backend selection
+
+```csharp
+Settings.Default.UseNativeCrypto = true;  // Native .NET (default)
+Settings.Default.UseNativeCrypto = false; // BouncyCastle streaming
+```
+
+All sealer, unsealer, verifier and completer factories capture the current value at each `Create` call. Existing instances retain their implementation. Service clients include the flag in their context-cache keys: the next encryption/decryption call uses the new setting, while active operations finish before their old context is disposed. Messages from either backend can be read by either backend.
+
+For concurrent comparisons without changing global configuration, every factory also accepts a fixed override:
+
+```csharp
+var factory = new DataSealerFactory(loggerFactory, useNativeCrypto: false);
+```
+
+The switch covers RSA-PSS/ECDSA message signing and verification, AES-CBC content encryption/decryption, RSA/AES recipient key wrapping, and streaming CMS construction/parsing/completion. Both implementations share signature metadata handling and certificate, timestamp and revocation policy. PKCS#12 loading, ETK parsing, CRL/OCSP, RFC 3161 and SOAP/STS stay on the current platform implementation; this is not a rollback of the entire PKI migration.
+
+BouncyCastle mode exports private keys into managed key parameters. Use native mode for non-exportable keys or hardware key providers. There is no automatic fallback between backends. Both modes keep the existing admission and cancellation policy; individual cryptographic primitive calls cannot be interrupted midway.
 
 ## Compatibility changes
 
@@ -21,7 +40,7 @@ This is a breaking migration: .NET Framework 4.6.2, .NET Standard 2.0 and .NET 6
 
 `ToTimeStampToken`, `IsMatch`, `Validate` and `ValidateAsync` remain extension methods in the PKI namespace. Revocation lists passed to chain/timestamp verification must use the new evidence types. `GetEncoded()` returns DER evidence suitable for CAdES attributes.
 
-RSA-PSS is always native. `Settings.Default.UseNativeRsaPss` is an obsolete compatibility shim: it returns true, accepts true, and throws if set to false. There is no managed BouncyCastle backend to switch back to. RSA signing requires a platform key provider supporting PSS; verification retains the configured RSA-PKCS#1 and ECDSA eHealth algorithms. Native PSS uses MGF1 with the same digest and a digest-sized salt; unsupported PSS parameter combinations fail validation instead of downgrading algorithms.
+`Settings.Default.UseNativeRsaPss` is an obsolete read/write alias for `UseNativeCrypto`. It now selects the **whole message backend**, rather than the earlier signing-only hybrid. New code should use `UseNativeCrypto`. Native RSA signing requires a platform key provider supporting PSS; verification retains the configured RSA-PKCS#1 and ECDSA eHealth algorithms. Native PSS uses MGF1 with the same digest and a digest-sized salt; unsupported PSS parameter combinations fail validation instead of downgrading algorithms.
 
 PKCS#12 imports preserve named aliases, private-key associations and repeated CA-bag behavior. Password/MAC validation and import limits are provided by the platform loader. Certificates are owned by `EHealthP12`; borrowed certificates must outlive active client operations. Native decryption no longer exports private keys to construct managed key pairs.
 
@@ -29,7 +48,9 @@ System trust remains the default. Applications needing explicit private trust an
 
 ## Memory behavior
 
-.NET `SignedCms` works with complete message buffers. Public APIs still accept/return streams, and outputs above `Settings.Default.InMemorySize` are stored in temporary files, but that threshold **does not cap internal CMS memory**. This differs from the previous BouncyCastle streaming implementation. Keep admission limits in place and measure large-payload concurrency before deployment. Input lengths beyond the platform's signed 32-bit buffer limit are rejected.
+.NET `SignedCms` works with complete message buffers. In native mode, outputs above `Settings.Default.InMemorySize` are stored in temporary files, but that threshold **does not cap internal CMS memory**. Native input lengths beyond the platform's signed 32-bit buffer limit are rejected.
+
+BouncyCastle mode streams payloads through signatures and encryption, using temporary intermediate files above the threshold. Only detached signature metadata (including certificates and revocation evidence) passes through the shared platform CMS policy. Non-seekable inputs are first spooled to a temporary file. Legacy signatures without signed attributes require buffered BouncyCastle verification; newly sealed messages always include signed attributes. The threshold is a buffering choice, not a hard bound on process memory. Keep admission limits in place and measure large-payload concurrency before deployment.
 
 ## Validation
 
@@ -40,9 +61,10 @@ The deterministic suite covers:
 - B/T/LT/LTA profiles, timestamp verification, completion without changing signatures, and time-mark keys.
 - Derived eHealth encryption certificates/ETKs, historical timestamps, PKCS#12 aliases and private keys, and SAML distinguished-name formatting.
 - Invalid signatures, trailing data, CRL partitions, cache bounds, cancellation, deadlines, and shared request behavior.
-- An assembly-reference assertion that production libraries do not reference BouncyCastle.
+- Backend selection, pinned factories, large-message streaming, non-seekable inputs, and changed content in either signature layer.
+- An assembly-reference assertion that PKI and transport remain independent of BouncyCastle.
 
-The tests use generated credentials, public historical fixtures and localhost responders. They do not exercise live eHealth endpoints or private production credentials. Production and test projects build for .NET 8; comparison dependencies remain confined to tests/benchmarks.
+The tests use generated credentials, public historical fixtures and localhost responders. They do not exercise live eHealth endpoints or private production credentials. Production and test projects build for .NET 8.
 
 Run:
 

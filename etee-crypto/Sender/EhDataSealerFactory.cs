@@ -18,6 +18,7 @@
 
 
 using System;
+using Egelke.EHealth.Etee.Crypto.Configuration;
 using System.Collections.Generic;
 using System.Text;
 using System.Security.Cryptography.X509Certificates;
@@ -38,6 +39,7 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
     public class EhDataSealerFactory
     {
         private ILoggerFactory _loggerFactory;
+        private readonly bool? useNativeCrypto;
 
         [Obsolete("Drops all logging, please use the other constructor")]
         public EhDataSealerFactory()
@@ -45,9 +47,13 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
             _loggerFactory = NullLoggerFactory.Instance;
         }
 
-        public EhDataSealerFactory(ILoggerFactory loggerFactory)
+        public EhDataSealerFactory(ILoggerFactory loggerFactory) : this(loggerFactory, null) { }
+
+        /// <summary>Creates a factory with an optional fixed backend; null follows Settings.Default at each Create call.</summary>
+        public EhDataSealerFactory(ILoggerFactory loggerFactory, bool? useNativeCrypto)
         {
             _loggerFactory = loggerFactory;
+            this.useNativeCrypto = useNativeCrypto;
         }
 
         /// <summary>
@@ -68,7 +74,7 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
             if ((level & Level.T_Level) == Level.T_Level) throw new NotSupportedException("This method can't create timestamps");
 
             X509Certificate2 cert = p12["authentication"];
-            return new TripleWrapper(level, cert, cert, null, p12.ToCollection(), _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, cert, cert, null, p12.ToCollection(), _loggerFactory);
         }
 
         /// <summary>
@@ -97,7 +103,7 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time stamping");
 
             X509Certificate2 cert = p12["authentication"];
-            return new TripleWrapper(level, cert, cert, timestampProvider, p12.ToCollection(), _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, cert, cert, timestampProvider, p12.ToCollection(), _loggerFactory);
         }
 
         /// <summary>
@@ -122,7 +128,7 @@ namespace Egelke.EHealth.Etee.Crypto.Sender
             if ((level & Level.T_Level) != Level.T_Level) throw new ArgumentException("This method should for a level that requires time marking");
 
             X509Certificate2 cert = p12["authentication"];
-            return new TripleWrapper(level, cert, cert, null, p12.ToCollection(), _loggerFactory.CreateLogger<TripleWrapper>());
+            return CryptoBackendFactory.Wrapper(useNativeCrypto ?? Settings.Default.UseNativeCrypto, level, cert, cert, null, p12.ToCollection(), _loggerFactory);
         }
 
     }

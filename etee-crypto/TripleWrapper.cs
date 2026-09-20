@@ -18,14 +18,14 @@ namespace Egelke.EHealth.Etee.Crypto
 {
     internal class TripleWrapper : IDataSealer, IDataCompleter, ITmaDataCompleter, IDisposable
     {
-        private readonly Level level;
-        private readonly WebKey ownWebKey;
-        private readonly X509Certificate2 authentication, signature;
+        protected readonly Level level;
+        protected readonly WebKey ownWebKey;
+        protected readonly X509Certificate2 authentication, signature;
         private readonly ITimestampProvider timestampProvider;
         private readonly X509Certificate2Collection extraStore;
         private readonly ILogger<TripleWrapper> logger;
         private readonly ConcurrentDictionary<X509Certificate2, Lazy<AsymmetricAlgorithm>> keys = new();
-        private int disposed;
+        protected int disposed;
         internal TripleWrapper(Level level, WebKey ownWebKey, ITimestampProvider timestampProvider, ILogger<TripleWrapper> logger = null)
             : this(level, null, null, timestampProvider, null, logger) { this.ownWebKey = ownWebKey; }
         internal TripleWrapper(Level level, X509Certificate2 authentication, X509Certificate2 signature, ITimestampProvider timestampProvider, X509Certificate2Collection extraStore, ILogger<TripleWrapper> logger = null)
@@ -34,7 +34,7 @@ namespace Egelke.EHealth.Etee.Crypto
             this.level = level; this.authentication = authentication; this.signature = signature ?? authentication;
             this.timestampProvider = timestampProvider; this.extraStore = extraStore; this.logger = logger;
         }
-        public void Dispose()
+        public virtual void Dispose()
         {
             if (Interlocked.Exchange(ref disposed, 1) != 0) return;
             foreach (var key in keys.Values) if (key.IsValueCreated) key.Value.Dispose();
@@ -57,7 +57,7 @@ namespace Egelke.EHealth.Etee.Crypto
         public Task<Stream> SealAsync(Stream input, SecretKey key, params EncryptionToken[] recipients) => SealAsync(input, key, recipients, null);
         public Task<Stream> SealAsync(Stream input, SecretKey key, EncryptionToken[] recipients, WebKey[] webKeys)
             => OperationPolicy.Default.RunAsync(_ => SealCoreAsync(input, key, recipients?.Select(t => t.ToCertificate()).ToArray(), webKeys));
-        private async Task<Stream> SealCoreAsync(Stream input, SecretKey key, X509Certificate2[] recipients, WebKey[] webKeys)
+        protected virtual async Task<Stream> SealCoreAsync(Stream input, SecretKey key, X509Certificate2[] recipients, WebKey[] webKeys)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
             if (signature == null && ownWebKey == null) throw new InvalidOperationException("A signing certificate or WebKey is required");
@@ -93,13 +93,17 @@ namespace Egelke.EHealth.Etee.Crypto
         { var result = CompleteWithKeyAsync(data).GetAwaiter().GetResult(); key = result.TimemarkKey; return result.Value; }
         public async Task<Stream> CompleteAsync(Stream data) => (await CompleteWithKeyAsync(data).ConfigureAwait(false)).Value;
         Task<TimemarkedResult<Stream>> ITmaDataCompleter.CompleteAsync(Stream data) => CompleteWithKeyAsync(data);
-        private Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream data) => OperationPolicy.Default.RunAsync(async _ =>
+        private Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream data) => OperationPolicy.Default.RunAsync(_ => CompleteMessageAsync(data));
+        protected virtual async Task<TimemarkedResult<Stream>> CompleteMessageAsync(Stream data)
         {
+            ObjectDisposedException.ThrowIf(disposed != 0, this);
             var cms = NativeCms.Decode(NativeCms.Read(data));
             var key = await CompleteCoreAsync(cms, null, level).ConfigureAwait(false);
             return new TimemarkedResult<Stream>(ToStream(cms.Encode()), key);
-        });
-        private async Task<TimemarkKey> CompleteCoreAsync(SignedCms cms, X509Certificate2 provided, Level? requested)
+        }
+        // Operates on signature metadata only. The streaming backend supplies detached CMS,
+        // so chain building and unsigned-attribute updates never buffer the payload here.
+        protected async Task<TimemarkKey> CompleteCoreAsync(SignedCms cms, X509Certificate2 provided, Level? requested)
         {
             var signer = NativeCms.SingleSigner(cms);
             var certificate = NativeCms.FindSigner(cms) ?? provided;
