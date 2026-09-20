@@ -24,11 +24,11 @@ using BCert = Org.BouncyCastle.X509.X509Certificate;
 internal class PkiFixture
 {
     internal static AsymmetricCipherKeyPair NewKey() { using var rsa = RSA.Create(2048); return DotNetUtilities.GetRsaKeyPair(rsa); }
-    internal static BCert MakeCert(string name, BigInteger serial, AsymmetricCipherKeyPair key, BCert issuer, AsymmetricCipherKeyPair issuerKey, string ocsp = null, string crl = null, bool timestamp = false, int? keyUsage = null)
+    internal static BCert MakeCert(string name, BigInteger serial, AsymmetricCipherKeyPair key, BCert issuer, AsymmetricCipherKeyPair issuerKey, string ocsp = null, string crl = null, bool timestamp = false, int? keyUsage = null, DateTime? notAfter = null)
     {
         var gen = new X509V3CertificateGenerator();
         gen.SetSerialNumber(serial); gen.SetIssuerDN(issuer?.SubjectDN ?? new X509Name(name)); gen.SetSubjectDN(new X509Name(name));
-        gen.SetNotBefore(DateTime.UtcNow.AddDays(-1)); gen.SetNotAfter(DateTime.UtcNow.AddDays(2)); gen.SetPublicKey(key.Public);
+        gen.SetNotBefore(DateTime.UtcNow.AddDays(-1)); gen.SetNotAfter(notAfter ?? DateTime.UtcNow.AddDays(2)); gen.SetPublicKey(key.Public);
         gen.AddExtension(X509Extensions.BasicConstraints, true, new BasicConstraints(issuer == null));
         gen.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(keyUsage ?? (issuer == null ? KeyUsage.KeyCertSign | KeyUsage.CrlSign : KeyUsage.DigitalSignature)));
         if (timestamp) gen.AddExtension(X509Extensions.ExtendedKeyUsage, true, new ExtendedKeyUsage(KeyPurposeID.id_kp_timeStamping));

@@ -5,6 +5,7 @@ using Egelke.EHealth.Client.Pki;
 using Org.BouncyCastle.Math;
 using Xunit;
 
+[Collection("Revocation")]
 public class ChainCacheTests : IDisposable
 {
     private readonly X509Certificate2Collection previous = X509CertificateHelper.CustomTrustStore;
