@@ -57,3 +57,16 @@ The [native streaming report](../docs/native-streaming-performance.md) measures 
 The executable accepts `--suite crypto-concurrency --payload-kib 8192 --concurrency 4 --requests 32 --threshold-mib 1`. Each scenario should run in a fresh process. Closed-loop workers share a sealer, unsealer, RSA-2048 key and immutable input, matching client context reuse. One shared admission policy bounds the complete seal/unseal request. Five warm-up requests precede three measured rounds. Workers wait on a start barrier; request latency includes dispatch, admission and both crypto operations, and throughput is completed requests per second. Per-request mean/p50/p95, peak active requests, allocations, CPU and process peak memory appear under `concurrencyDetails`. This measures steady concurrency, not an external arrival-rate/overload queue or live SOAP service. `-ThresholdMiB` varies the per-stream memory allowance, and `-CpuLimit`/`-MemoryGiB` set the container limits.
 
 Add `-ServerGC` to compare Server GC; the raw metadata records the actual runtime mode. See the [4-vCPU/16-GiB report](../docs/fargate-latency-tuning.md) for all 24 before/after and tuning profiles.
+
+## Pharmacy prescription retrieval
+
+```powershell
+./benchmarks/run-linux.ps1 -Suite pharmacy -CpuLimit 4 -MemoryGiB 4 -Concurrency 4 -Requests 64
+./benchmarks/run-linux.ps1 -Suite pharmacy -CpuLimit 4 -MemoryGiB 4 -Concurrency 4 -Requests 64 -CitizenCrlEntries 0
+```
+
+The executable accepts `--suite pharmacy --concurrency 4 --requests 64 --prescribers 16 --citizen-crl-entries 350000 --ehealth-crl-entries 20000`. Each closed-loop request does what a pharmacy does for one prescription: seal a 1 KiB request to the Recip-e encryption certificate with the pharmacy certificate, unseal the Recip-e response (signed by the Recip-e certificate, encrypted to the pharmacy certificate), and unseal the 4 KiB prescription inside it with its KGSS secret key at LT level, with a time-mark provider standing in for Recip-e. Sixteen prescriber certificates rotate across requests. STS, KGSS and SOAP transport are outside the scenario; the KGSS key exchange has the same shape as the request/response pair.
+
+Certificates are generated in-process with the shapes of the Belgian hierarchies: pharmacy, Recip-e and encryption certificates chain root > government CA > eHealth-platform CA; prescriber certificates chain root > Citizen CA, like eID signature certificates. An in-process HTTP server serves every CRL and there is no OCSP responder, so each chain validation falls back to CRLs. The Citizen CA list defaults to 350,000 entries, matching the live `eidc201204.crl` (12,263,364 bytes, committed unchanged as `pki-test/files/eid79021802145.crl`). The eHealth-platform CA list defaults to 20,000 entries; that is an assumption, because the live Zetes list was unavailable when this scenario was written. Root and government lists are small.
+
+The result records the cold first request (CRL downloads, parsing and signature checks), the parse time of the generated and committed Citizen CA lists, and per round the cumulative CRL download count plus the revocation cache's entry count and estimated bytes. A download count that keeps growing across rounds means a list is not being retained.

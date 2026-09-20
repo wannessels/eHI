@@ -142,6 +142,8 @@ namespace Egelke.EHealth.Client.Pki
         private readonly byte[] encoded, signed, signature, responderName, responderKeyHash;
         private readonly (string Oid, byte[] Parameters) algorithm;
         private readonly byte[][] certificates;
+        private readonly object sync = new object();
+        private string verifiedIssuer;
         public DateTime ProducedAt { get; }
         public IReadOnlyList<CertificateStatus> Responses { get; }
         public byte[] GetEncoded() => (byte[])encoded.Clone();
@@ -212,6 +214,15 @@ namespace Egelke.EHealth.Client.Pki
         internal void Verify(X509Certificate2 issuer)
         {
             if (ProducedAt > DateTime.UtcNow.AddMinutes(5)) throw new RevocationUnknownException("OCSP response was produced in the future");
+            lock (sync)
+            {
+                if (verifiedIssuer == issuer.Thumbprint) return;
+                if (!SignedByAuthorizedResponder(issuer)) throw new RevocationUnknownException("OCSP signature or responder authorization is invalid");
+                verifiedIssuer = issuer.Thumbprint;
+            }
+        }
+        private bool SignedByAuthorizedResponder(X509Certificate2 issuer)
+        {
             var candidates = new List<X509Certificate2> { issuer };
             try
             {
@@ -223,9 +234,9 @@ namespace Egelke.EHealth.Client.Pki
                     bool directIssuer = candidate.RawData.AsSpan().SequenceEqual(issuer.RawData);
                     if (!directIssuer && (!CryptoEncoding.NamesEqual(candidate.IssuerName.RawData, issuer.SubjectName.RawData) || !CryptoEncoding.VerifyCertificate(candidate, issuer) || !CryptoEncoding.HasPurpose(candidate, "1.3.6.1.5.5.7.3.9"))) continue;
                     if (!CryptoEncoding.ValidAt(candidate, ProducedAt)) continue;
-                    if (CryptoEncoding.VerifySignature(candidate, signed, algorithm.Oid, algorithm.Parameters, signature)) return;
+                    if (CryptoEncoding.VerifySignature(candidate, signed, algorithm.Oid, algorithm.Parameters, signature)) return true;
                 }
-                throw new RevocationUnknownException("OCSP signature or responder authorization is invalid");
+                return false;
             }
             finally { foreach (var cert in candidates.Skip(1)) cert.Dispose(); }
         }

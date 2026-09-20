@@ -11,10 +11,10 @@ internal static class Program
     {
         Quick = args.Contains("--quick");
         if (Quick) Rounds = 1;
-        var suiteIndex = Array.IndexOf(args, "--suite");
-        string suite = suiteIndex >= 0 ? args[suiteIndex + 1] : "all";
-        var outputIndex = Array.IndexOf(args, "--output");
-        string output = outputIndex >= 0 ? args[outputIndex + 1] : "profile.json";
+        string Option(string name, string fallback) { int index = Array.IndexOf(args, name); return index < 0 ? fallback : args[index + 1]; }
+        int Number(string name, int fallback) => int.Parse(Option(name, fallback.ToString()));
+        string suite = Option("--suite", "all");
+        string output = Option("--output", "profile.json");
         var metadata = new
         {
             StartedUtc = DateTime.UtcNow,
@@ -34,27 +34,23 @@ internal static class Program
         };
         object? httpDetails = null;
         object? concurrencyDetails = null;
+        object? pharmacyDetails = null;
         try
         {
             if (suite is "all" or "crypto") await CryptoProfiles.RunAsync();
             if (suite == "native-memory")
-            {
-                int sizeIndex = Array.IndexOf(args, "--payload-mib");
-                int thresholdIndex = Array.IndexOf(args, "--threshold-mib");
-                await CryptoProfiles.NativeMemoryAsync(sizeIndex < 0 ? 8 : int.Parse(args[sizeIndex + 1]), thresholdIndex < 0 ? null : int.Parse(args[thresholdIndex + 1]));
-            }
+                await CryptoProfiles.NativeMemoryAsync(Number("--payload-mib", 8), Array.IndexOf(args, "--threshold-mib") < 0 ? null : Number("--threshold-mib", 0));
             if (suite is "all" or "memory") await MemoryProfiles.RunAsync();
             if (suite is "all" or "http") httpDetails = await HttpProfiles.RunAsync();
             if (suite == "crypto-concurrency")
-            {
-                int Option(string name, int fallback) { int index = Array.IndexOf(args, name); return index < 0 ? fallback : int.Parse(args[index + 1]); }
-                concurrencyDetails = await ConcurrentCryptoProfiles.RunAsync(Option("--payload-kib", 8192) * 1024, Option("--concurrency", 4), Option("--requests", Quick ? 8 : 32), Option("--threshold-mib", 16));
-            }
+                concurrencyDetails = await ConcurrentCryptoProfiles.RunAsync(Number("--payload-kib", 8192) * 1024, Number("--concurrency", 4), Number("--requests", Quick ? 8 : 32), Number("--threshold-mib", 16));
+            if (suite == "pharmacy")
+                pharmacyDetails = await PharmacyProfiles.RunAsync(Number("--concurrency", 4), Number("--requests", Quick ? 8 : 64), Number("--prescribers", 16), Number("--citizen-crl-entries", 350_000), Number("--ehealth-crl-entries", 20_000));
         }
         finally
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
-            await File.WriteAllTextAsync(output, JsonSerializer.Serialize(new { metadata, results = Results, httpDetails, concurrencyDetails }, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(output, JsonSerializer.Serialize(new { metadata, results = Results, httpDetails, concurrencyDetails, pharmacyDetails }, new JsonSerializerOptions { WriteIndented = true }));
         }
     }
     private static string? ReadIfExists(string path) => File.Exists(path) ? File.ReadAllText(path).Trim() : null;
