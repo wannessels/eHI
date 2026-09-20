@@ -6,7 +6,7 @@ The libraries target .NET 8. Set `Settings.Default.UseNativeCrypto = true` for n
 
 Dispose directly held factory-created sealers/unsealers after active operations finish, using `(instance as IDisposable)?.Dispose()`. Service clients retire and dispose their owned contexts automatically. Caller-owned certificates, stores and WebKeys must outlive active operations.
 
-Native signing, encryption, verification, decryption and completion stream payloads. `InMemorySize` controls when each native stage spills to disk; known large stages start on disk. Native metadata decoding has a separate 16 MiB-per-layer default limit (`MaximumNativeMetadataSize`). Keep admission limits appropriate to the task's memory and temporary-storage budget. The [earlier allocation reductions](native-memory-improvements.md) are a historical comparison of the buffered implementation before this streaming change.
+Native signing, encryption, verification, decryption and completion stream payloads. `InMemorySize` controls when each native stage spills to disk; known large stages start on disk. Native metadata decoding has a separate 16 MiB-per-layer default limit (`MaximumNativeMetadataSize`). Keep admission limits appropriate to the task's memory and temporary-storage budget. See the [streaming measurements](native-streaming-performance.md): allocation fell substantially, with a latency cost in the local profile. The [earlier allocation reductions](native-memory-improvements.md) describe the previous buffered implementation.
 ## Admission, cancellation and caching
 
 Use one shared policy for clients belonging to the same application capacity budget:

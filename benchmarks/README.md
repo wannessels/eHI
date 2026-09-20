@@ -43,3 +43,5 @@ The [complete native migration report](../docs/native-crypto-performance.md) com
 The [selectable backend report](../docs/backend-crypto-performance.md) compares the current native and BouncyCastle streaming modes on .NET 8. Scratch results now use the `backends-net8-1cpu-1g` filename prefix.
 
 The [native memory improvement report](../docs/native-memory-improvements.md) compares the optimized native implementation with its immediate predecessor in fresh processes. Use `-Suite native-memory` to reproduce that isolated scenario.
+
+The [native streaming report](../docs/native-streaming-performance.md) measures the current implementation at 8 MiB and 32 MiB and compares it with the prior buffered native backend. It includes the observed memory/latency trade-off.

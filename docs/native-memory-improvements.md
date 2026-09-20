@@ -1,5 +1,7 @@
 # Native CMS memory reductions (.NET 8)
 
+This historical snapshot predates full native streaming. See the [streaming implementation and measurements](native-streaming-performance.md) for current behavior.
+
 Keeping payloads outside signature metadata substantially reduces native CMS memory use. `Settings.Default.UseNativeCrypto` remains the backend selector; the obsolete signing-only flag has been removed.
 
 ## Matched 8 MiB round-trip comparison

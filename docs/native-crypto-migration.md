@@ -83,4 +83,4 @@ For production dependency auditing:
 dotnet list services/services.csproj package --include-transitive
 ```
 
-See [performance configuration](performance.md), [current native memory measurements](native-memory-improvements.md), and [benchmark methodology](../benchmarks/README.md). The earlier [backend comparison](backend-crypto-performance.md), [native migration comparison](native-crypto-performance.md), and [profiling report](performance-profiling.md) are historical snapshots.
+See [performance configuration](performance.md), [current native streaming measurements](native-streaming-performance.md), and [benchmark methodology](../benchmarks/README.md). The earlier [buffered memory improvements](native-memory-improvements.md), [backend comparison](backend-crypto-performance.md), [native migration comparison](native-crypto-performance.md), and [profiling report](performance-profiling.md) are historical snapshots.
