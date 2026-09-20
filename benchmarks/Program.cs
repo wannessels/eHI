@@ -47,7 +47,7 @@ internal static class Program
             if (suite == "crypto-concurrency")
             {
                 int Option(string name, int fallback) { int index = Array.IndexOf(args, name); return index < 0 ? fallback : int.Parse(args[index + 1]); }
-                concurrencyDetails = await ConcurrentCryptoProfiles.RunAsync(Option("--payload-kib", 8192) * 1024, Option("--concurrency", 4), Option("--requests", Quick ? 8 : 32));
+                concurrencyDetails = await ConcurrentCryptoProfiles.RunAsync(Option("--payload-kib", 8192) * 1024, Option("--concurrency", 4), Option("--requests", Quick ? 8 : 32), Option("--threshold-mib", 1));
             }
         }
         finally

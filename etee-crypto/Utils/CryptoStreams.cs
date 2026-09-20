@@ -16,6 +16,13 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         internal CryptoSpool(long expectedLength = 0)
         {
             if (expectedLength > threshold) { storage.Dispose(); storage = new WindowsTempFileStream(true); }
+            else if (expectedLength > 0 && expectedLength <= int.MaxValue)
+            {
+                // Reserve the known payload plus modest CMS overhead without repeated
+                // MemoryStream growth/LOH copies when the configured budget permits it.
+                long capacity = Math.Min(threshold, expectedLength + 16 * 1024);
+                if (capacity <= int.MaxValue) { storage.Dispose(); storage = new MemoryStream((int)capacity); }
+            }
         }
         internal static long Remaining(Stream stream) => stream.CanSeek ? Math.Max(0, stream.Length - stream.Position) : 0;
         private void Reserve(int count)

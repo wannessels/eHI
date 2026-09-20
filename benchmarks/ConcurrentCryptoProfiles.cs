@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Etee.Crypto;
+using Egelke.EHealth.Etee.Crypto.Configuration;
 using Egelke.EHealth.Etee.Crypto.Receiver;
 using Egelke.EHealth.Etee.Crypto.Sender;
 using Egelke.EHealth.Etee.Crypto.Status;
@@ -10,9 +11,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 internal static class ConcurrentCryptoProfiles
 {
-    internal static async Task<object> RunAsync(int bytes, int concurrency, int requests)
+    internal static async Task<object> RunAsync(int bytes, int concurrency, int requests, int thresholdMiB)
     {
-        if (bytes < 1 || concurrency < 1 || requests < concurrency) throw new ArgumentOutOfRangeException();
+        if (bytes < 1 || concurrency < 1 || requests < concurrency || thresholdMiB < 0) throw new ArgumentOutOfRangeException();
+        Settings.Default.InMemorySize = checked((long)thresholdMiB * 1024 * 1024);
         using var rsa = RSA.Create(2048); var sender = new WebKey(rsa);
         var recipient = new SecretKey(new byte[] { 1 }, RandomNumberGenerator.GetBytes(16));
         var sealer = new DataSealerFactory(NullLoggerFactory.Instance, true).Create(Level.B_Level, sender);
@@ -69,7 +71,7 @@ internal static class ConcurrentCryptoProfiles
                 process.Refresh(); Array.Sort(latencies);
                 var result = new
                 {
-                    Round = round, PayloadBytes = bytes, Concurrency = concurrency, PeakActiveRequests = peakActive, Requests = requests,
+                    Round = round, PayloadBytes = bytes, Concurrency = concurrency, PeakActiveRequests = peakActive, Requests = requests, ThresholdMiB = thresholdMiB,
                     MeanMs = latencies.Average(), P50Ms = latencies[requests / 2], P95Ms = latencies[Math.Min(requests - 1, (int)Math.Ceiling(requests * .95) - 1)],
                     RequestsPerSecond = requests / elapsed.Elapsed.TotalSeconds,
                     AllocatedBytesPerRequest = (GC.GetTotalAllocatedBytes(true) - allocated) / (double)requests,
