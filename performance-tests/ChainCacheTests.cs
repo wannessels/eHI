@@ -76,10 +76,24 @@ public class ChainCacheTests : IDisposable
         var certificates = store.Certificates;
         try
         {
-            var certificate = certificates.Cast<X509Certificate2>().First(c => CryptoEncoding.ValidAt(c, DateTime.UtcNow));
+            // Store membership and date validity do not imply a usable trusted path:
+            // hosted Windows runners also contain roots rejected by platform policy.
+            // Select the fixture with an independent platform build, then verify that
+            // the library repeats that successful decision without serving a cache hit.
+            DateTime time = DateTime.UtcNow;
+            var certificate = certificates.Cast<X509Certificate2>().FirstOrDefault(candidate =>
+            {
+                if (!CryptoEncoding.ValidAt(candidate, time) || !CryptoEncoding.NamesEqual(candidate.SubjectName.RawData, candidate.IssuerName.RawData)) return false;
+                using var platform = new X509Chain();
+                platform.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                platform.ChainPolicy.VerificationTime = time;
+                platform.ChainPolicy.UrlRetrievalTimeout = TimeSpan.FromSeconds(5);
+                return platform.Build(candidate);
+            });
+            Assert.NotNull(certificate);
             for (int i = 0; i < 2; i++)
             {
-                var chain = certificate.BuildChain(DateTime.UtcNow, null);
+                var chain = certificate.BuildChain(time, null);
                 Assert.Empty(chain.ChainStatus); DisposeChain(chain);
             }
             Assert.Equal(0, ChainCache.Count); Assert.Equal(0, ChainCache.Hits); Assert.Equal(2, ChainCache.Misses);
