@@ -41,6 +41,7 @@ internal static class Program
             if (suite == "native-memory")
                 await CryptoProfiles.NativeMemoryAsync(Number("--payload-mib", 8), Array.IndexOf(args, "--threshold-mib") < 0 ? null : Number("--threshold-mib", 0));
             if (suite is "all" or "memory") await MemoryProfiles.RunAsync();
+            if (suite == "keys") await KeyProfiles.RunAsync();
             if (suite is "all" or "http") httpDetails = await HttpProfiles.RunAsync();
             if (suite == "crypto-concurrency")
                 concurrencyDetails = await ConcurrentCryptoProfiles.RunAsync(Number("--payload-kib", 8192) * 1024, Number("--concurrency", 4), Number("--requests", Quick ? 8 : 32), Number("--threshold-mib", 16));
