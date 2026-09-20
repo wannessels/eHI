@@ -40,7 +40,7 @@ namespace Egelke.EHealth.Client.Services
         }
 
         protected Task<T> RunOperationAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
-            => OperationPolicy.RunAsync(_ => operation(), cancellationToken);
+            => OperationPolicy.RunAsync(typeof(Port).Name, _ => operation(), cancellationToken);
 
         protected async Task<T> SendAsync<T>(Func<Task<T>> send)
         {

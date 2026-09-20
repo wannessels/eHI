@@ -42,7 +42,7 @@ namespace Egelke.EHealth.Etee.Crypto
         public Task<UnsealResult> UnsealAsync(Stream data) => UnsealAsync(data, null, null);
         public Task<UnsealResult> UnsealAsync(Stream data, WebKey sender) => UnsealAsync(data, sender, null);
         public Task<UnsealResult> UnsealAsync(Stream data, SecretKey key) => UnsealAsync(data, null, key);
-        public Task<UnsealResult> UnsealAsync(Stream data, WebKey sender, SecretKey key) => OperationPolicy.Default.RunAsync(_ => UnsealCoreAsync(data, sender, key));
+        public Task<UnsealResult> UnsealAsync(Stream data, WebKey sender, SecretKey key) => OperationPolicy.Default.RunAsync("unseal", _ => UnsealCoreAsync(data, sender, key));
         protected virtual async Task<UnsealResult> UnsealCoreAsync(Stream data, WebKey sender, SecretKey key)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
@@ -77,7 +77,7 @@ namespace Egelke.EHealth.Etee.Crypto
         public Task<SignatureSecurityInformation> VerifyAsync(Stream data) => VerifyAsync(data, (WebKey)null);
         public Task<SignatureSecurityInformation> VerifyAsync(Stream data, WebKey sender) => VerifyAsync(data, sender, timemark);
         private Task<SignatureSecurityInformation> VerifyAsync(Stream data, WebKey sender, ITimemarkProvider provider)
-            => OperationPolicy.Default.RunAsync(_ => VerifyMessageAsync(data, sender, provider));
+            => OperationPolicy.Default.RunAsync("verify", _ => VerifyMessageAsync(data, sender, provider));
         protected virtual async Task<SignatureSecurityInformation> VerifyMessageAsync(Stream data, WebKey sender, ITimemarkProvider provider)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);

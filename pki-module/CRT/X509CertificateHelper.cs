@@ -107,7 +107,8 @@ namespace Egelke.EHealth.Client.Pki
 
             string key = ChainCache.Key(cert, extraStore);
             Chain cached = ChainCache.TryGet(key, validationTime);
-            if (cached != null) return cached;
+            if (cached != null) { EHealthMetrics.ChainBuilds.Add(1, new TagList { { "source", "cache" } }); return cached; }
+            long started = Stopwatch.GetTimestamp();
             using (X509Chain x509Chain = new X509Chain())
             {
                 if (extraStore != null) x509Chain.ChainPolicy.ExtraStore.AddRange(extraStore);
@@ -123,6 +124,7 @@ namespace Egelke.EHealth.Client.Pki
                 x509Chain.ChainPolicy.DisableCertificateDownloads = DisableCertificateDownloads;
 #endif
                 x509Chain.Build(cert);
+                EHealthMetrics.Record(EHealthMetrics.ChainBuilds, EHealthMetrics.ChainBuildDuration, started, new TagList { { "source", "platform" } });
                 OperationScope.Cancellation.ThrowIfCancellationRequested();
 
                 Chain chain = new Chain();
@@ -180,7 +182,7 @@ namespace Egelke.EHealth.Client.Pki
 
         /// <summary>Builds and validates a chain under the shared admission/deadline policy.</summary>
         public static Task<Chain> BuildChainAsync(this X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<CertificateRevocationList> crls, IList<OcspResponse> ocsps, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => BuildChainCoreAsync(cert, validationTime, extraStore, crls, ocsps), cancellationToken);
+            => OperationPolicy.Default.RunAsync("chain", _ => BuildChainCoreAsync(cert, validationTime, extraStore, crls, ocsps), cancellationToken);
 
         private static async Task<Chain> BuildChainCoreAsync(X509Certificate2 cert, DateTime validationTime, X509Certificate2Collection extraStore, IList<CertificateRevocationList> crls, IList<OcspResponse> ocsps)
         {
@@ -407,17 +409,25 @@ namespace Egelke.EHealth.Client.Pki
 
         private static async Task<OcspResponse> DownloadOcspAsync(Uri uri, byte[] request, CancellationToken cancellationToken)
         {
-            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-            using (var content = new ByteArrayContent(request))
+            long started = Stopwatch.GetTimestamp(); string outcome = "ok";
+            try
             {
-                cts.CancelAfter(OcspTimeout);
-                content.Headers.ContentType = new MediaTypeHeaderValue("application/ocsp-request");
-                using (var response = await http.PostAsync(uri, content, cts.Token).ConfigureAwait(false))
+                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                using (var content = new ByteArrayContent(request))
                 {
-                    VerifyOCSPRsp(response);
-                    return ParseOCSPResponse(await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false));
+                    cts.CancelAfter(OcspTimeout);
+                    content.Headers.ContentType = new MediaTypeHeaderValue("application/ocsp-request");
+                    using (var response = await http.PostAsync(uri, content, cts.Token).ConfigureAwait(false))
+                    {
+                        VerifyOCSPRsp(response);
+                        byte[] body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                        EHealthMetrics.RevocationDownloadBytes.Add(body.Length, new TagList { { "type", "ocsp" } });
+                        return ParseOCSPResponse(body);
+                    }
                 }
             }
+            catch (Exception error) { outcome = EHealthMetrics.Outcome(error); throw; }
+            finally { EHealthMetrics.Record(EHealthMetrics.RevocationDownloads, EHealthMetrics.RevocationDownloadDuration, started, new TagList { { "type", "ocsp" }, { "outcome", outcome } }); }
         }
 
         private static byte[] GetOcspReqBody(this X509Certificate2 cert, X509Certificate2 issuer)
@@ -507,16 +517,23 @@ namespace Egelke.EHealth.Client.Pki
 
         private static async Task<CertificateRevocationList> DownloadCrlAsync(Uri uri, CancellationToken cancellationToken)
         {
-            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            long started = Stopwatch.GetTimestamp(); string outcome = "ok";
+            try
             {
-                cts.CancelAfter(CrlTimeout);
-                using (var response = await http.GetAsync(uri, cts.Token).ConfigureAwait(false))
+                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
                 {
-                    VerifyCrlRsp(response);
-                    var body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                    return CertificateRevocationList.Parse(body);
+                    cts.CancelAfter(CrlTimeout);
+                    using (var response = await http.GetAsync(uri, cts.Token).ConfigureAwait(false))
+                    {
+                        VerifyCrlRsp(response);
+                        var body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                        EHealthMetrics.RevocationDownloadBytes.Add(body.Length, new TagList { { "type", "crl" } });
+                        return CertificateRevocationList.Parse(body);
+                    }
                 }
             }
+            catch (Exception error) { outcome = EHealthMetrics.Outcome(error); throw; }
+            finally { EHealthMetrics.Record(EHealthMetrics.RevocationDownloads, EHealthMetrics.RevocationDownloadDuration, started, new TagList { { "type", "crl" }, { "outcome", outcome } }); }
         }
 
         private static void VerifyCrlRsp(HttpResponseMessage webRsp)

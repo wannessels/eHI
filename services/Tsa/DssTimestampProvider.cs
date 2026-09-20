@@ -114,7 +114,7 @@ namespace Egelke.EHealth.Client.Services.Tsa
 
         /// <summary>Requests a timestamp with cancellation covering the complete service call.</summary>
         public Task<byte[]> GetTimestampFromDocumentHashAsync(byte[] hash, string digestMethod, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => GetTimestampFromDocumentHashAsync(hash, digestMethod), cancellationToken);
+            => OperationPolicy.Default.RunAsync("timestamp", _ => GetTimestampFromDocumentHashAsync(hash, digestMethod), cancellationToken);
 
         private SignRequest CreateRequest(byte[] hash, string digestMethod)
         {

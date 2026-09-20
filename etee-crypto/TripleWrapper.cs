@@ -52,11 +52,11 @@ namespace Egelke.EHealth.Etee.Crypto
         public Stream Seal(Stream input, SecretKey key, params EncryptionToken[] recipients) => SealAsync(input, key, recipients).GetAwaiter().GetResult();
         public Stream Seal(Stream input, SecretKey key, EncryptionToken[] recipients, WebKey[] webKeys) => SealAsync(input, key, recipients, webKeys).GetAwaiter().GetResult();
         public Task<Stream> SealAsync(Stream input, params EncryptionToken[] recipients) => SealAsync(input, null, recipients, null);
-        public Task<Stream> SealAsync(Stream input, params X509Certificate2[] recipients) => OperationPolicy.Default.RunAsync(_ => SealCoreAsync(input, null, recipients, null));
+        public Task<Stream> SealAsync(Stream input, params X509Certificate2[] recipients) => OperationPolicy.Default.RunAsync("seal", _ => SealCoreAsync(input, null, recipients, null));
         public Task<Stream> SealAsync(Stream input, params WebKey[] recipients) => SealAsync(input, null, null, recipients);
         public Task<Stream> SealAsync(Stream input, SecretKey key, params EncryptionToken[] recipients) => SealAsync(input, key, recipients, null);
         public Task<Stream> SealAsync(Stream input, SecretKey key, EncryptionToken[] recipients, WebKey[] webKeys)
-            => OperationPolicy.Default.RunAsync(_ => SealCoreAsync(input, key, recipients?.Select(t => t.ToCertificate()).ToArray(), webKeys));
+            => OperationPolicy.Default.RunAsync("seal", _ => SealCoreAsync(input, key, recipients?.Select(t => t.ToCertificate()).ToArray(), webKeys));
         protected virtual async Task<Stream> SealCoreAsync(Stream input, SecretKey key, X509Certificate2[] recipients, WebKey[] webKeys)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
@@ -100,7 +100,7 @@ namespace Egelke.EHealth.Etee.Crypto
         { var result = CompleteWithKeyAsync(data).GetAwaiter().GetResult(); key = result.TimemarkKey; return result.Value; }
         public async Task<Stream> CompleteAsync(Stream data) => (await CompleteWithKeyAsync(data).ConfigureAwait(false)).Value;
         Task<TimemarkedResult<Stream>> ITmaDataCompleter.CompleteAsync(Stream data) => CompleteWithKeyAsync(data);
-        private Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream data) => OperationPolicy.Default.RunAsync(_ => CompleteMessageAsync(data));
+        private Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream data) => OperationPolicy.Default.RunAsync("complete", _ => CompleteMessageAsync(data));
         protected virtual async Task<TimemarkedResult<Stream>> CompleteMessageAsync(Stream data)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);

@@ -97,7 +97,7 @@ namespace Egelke.EHealth.Client.Pki
 
         /// <summary>Gets a timestamp under the shared operation policy with caller cancellation.</summary>
         public Task<byte[]> GetTimestampFromDocumentHashAsync(byte[] hash, string digestMethod, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => GetTimestampCoreAsync(hash, digestMethod), cancellationToken);
+            => OperationPolicy.Default.RunAsync("timestamp", _ => GetTimestampCoreAsync(hash, digestMethod), cancellationToken);
 
         private async Task<byte[]> GetTimestampCoreAsync(byte[] hash, string digestMethod)
         {
@@ -105,18 +105,24 @@ namespace Egelke.EHealth.Client.Pki
             byte[] tsprBytes = tspReq.Encode();
             trace.TraceEvent(TraceEventType.Information, 0, "retrieving time-stamp of {0} from {1}", Convert.ToBase64String(hash), address);
 
-            using (var cts = CancellationTokenSource.CreateLinkedTokenSource(OperationScope.Cancellation))
-            using (var content = new ByteArrayContent(tsprBytes))
+            long started = Stopwatch.GetTimestamp(); string outcome = "ok";
+            try
             {
-                cts.CancelAfter(OperationScope.LimitTimeout(Timeout));
-                content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-query");
-                using (HttpResponseMessage response = await http.PostAsync(address, content, cts.Token).ConfigureAwait(false))
+                using (var cts = CancellationTokenSource.CreateLinkedTokenSource(OperationScope.Cancellation))
+                using (var content = new ByteArrayContent(tsprBytes))
                 {
-                    CheckRfc3161WebResponse(response);
-                    byte[] body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                    return ParseRfc3161ResponseBody(body, tspReq);
+                    cts.CancelAfter(OperationScope.LimitTimeout(Timeout));
+                    content.Headers.ContentType = new MediaTypeHeaderValue("application/timestamp-query");
+                    using (HttpResponseMessage response = await http.PostAsync(address, content, cts.Token).ConfigureAwait(false))
+                    {
+                        CheckRfc3161WebResponse(response);
+                        byte[] body = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                        return ParseRfc3161ResponseBody(body, tspReq);
+                    }
                 }
             }
+            catch (Exception error) { outcome = EHealthMetrics.Outcome(error); throw; }
+            finally { EHealthMetrics.Record(EHealthMetrics.TimestampRequests, EHealthMetrics.TimestampRequestDuration, started, new TagList { { "outcome", outcome } }); }
         }
 
         private static readonly Dictionary<string, string> DigestOids = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)

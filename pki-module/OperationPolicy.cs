@@ -113,21 +113,40 @@ namespace Egelke.EHealth.Client.Pki
             MaximumConcurrency = maximumConcurrency; Timeout = timeout;
         }
         /// <summary>Runs a complete operation with cancellation and a deadline.</summary>
-        public async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
+        public Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
+            => RunAsync("operation", operation, cancellationToken);
+        /// <summary>Runs a named operation; top-level runs are reported through <see cref="EHealthMetrics"/>, nested runs belong to their enclosing operation.</summary>
+        public async Task<T> RunAsync<T>(string name, Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)
         {
             bool nested = OperationScope.IsAdmitted;
+            long started = Stopwatch.GetTimestamp(); string outcome = "ok";
             using (var scope = new OperationScope(cancellationToken, Timeout))
             {
                 var token = OperationScope.Cancellation;
-                if (!nested) await admission.WaitAsync(token).ConfigureAwait(false);
-                scope.MarkAdmitted();
                 try
                 {
-                    token.ThrowIfCancellationRequested();
-                    T result = await operation(token).ConfigureAwait(false);
-                    return result;
+                    if (!nested)
+                    {
+                        await admission.WaitAsync(token).ConfigureAwait(false);
+                        EHealthMetrics.QueueDuration.Record(Stopwatch.GetElapsedTime(started).TotalMilliseconds, new TagList { { "operation", name } });
+                        EHealthMetrics.ActiveOperations.Add(1, new TagList { { "operation", name } });
+                    }
+                    scope.MarkAdmitted();
+                    try
+                    {
+                        token.ThrowIfCancellationRequested();
+                        return await operation(token).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        if (!nested) { admission.Release(); EHealthMetrics.ActiveOperations.Add(-1, new TagList { { "operation", name } }); }
+                    }
                 }
-                finally { if (!nested) admission.Release(); }
+                catch (Exception error) { outcome = EHealthMetrics.Outcome(error); throw; }
+                finally
+                {
+                    if (!nested) EHealthMetrics.Record(EHealthMetrics.Operations, EHealthMetrics.OperationDuration, started, new TagList { { "operation", name }, { "outcome", outcome } });
+                }
             }
         }
     }

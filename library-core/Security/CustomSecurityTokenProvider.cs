@@ -16,6 +16,7 @@
  *  along with eH-I.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System.Diagnostics;
 using System;
 using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
@@ -189,9 +190,15 @@ namespace Egelke.EHealth.Client.Security
                         {
                             token = cache.Get<SecurityToken>(tokenId);
                             if (IsUsable(token)) return token;
-                            token = token == null
-                            ? await CreateSamlHokTokenAsync(flightTimeout).ConfigureAwait(false)
-                            : await RenewSamlHokTokenAsync(token, flightTimeout).ConfigureAwait(false);
+                            string type = token == null ? "issue" : "renew"; long started = Stopwatch.GetTimestamp(); string outcome = "ok";
+                            try
+                            {
+                                token = token == null
+                                ? await CreateSamlHokTokenAsync(flightTimeout).ConfigureAwait(false)
+                                : await RenewSamlHokTokenAsync(token, flightTimeout).ConfigureAwait(false);
+                            }
+                            catch (Exception error) { outcome = EHealthMetrics.Outcome(error); throw; }
+                            finally { EHealthMetrics.Record(EHealthMetrics.StsRequests, EHealthMetrics.StsRequestDuration, started, new TagList { { "type", type }, { "outcome", outcome } }); }
                             cache.Set(tokenId, token, new MemoryCacheEntryOptions
                             {
                                 Size = 1,

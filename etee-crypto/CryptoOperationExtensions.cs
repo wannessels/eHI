@@ -14,32 +14,32 @@ namespace Egelke.EHealth.Etee.Crypto
     public static class CryptoOperationExtensions
     {
         public static Task<Stream> SealAsync(this IDataSealer sealer, Stream input, CancellationToken cancellationToken, params EncryptionToken[] recipients)
-            => OperationPolicy.Default.RunAsync(_ => sealer.SealAsync(input, recipients), cancellationToken);
+            => OperationPolicy.Default.RunAsync("seal", _ => sealer.SealAsync(input, recipients), cancellationToken);
         public static Task<Stream> SealAsync(this IDataSealer sealer, Stream input, CancellationToken cancellationToken, params X509Certificate2[] recipients)
-            => OperationPolicy.Default.RunAsync(_ => sealer.SealAsync(input, recipients), cancellationToken);
+            => OperationPolicy.Default.RunAsync("seal", _ => sealer.SealAsync(input, recipients), cancellationToken);
         public static Task<Stream> SealAsync(this IDataSealer sealer, Stream input, CancellationToken cancellationToken, params WebKey[] recipients)
-            => OperationPolicy.Default.RunAsync(_ => sealer.SealAsync(input, recipients), cancellationToken);
+            => OperationPolicy.Default.RunAsync("seal", _ => sealer.SealAsync(input, recipients), cancellationToken);
         public static Task<Stream> SealAsync(this IDataSealer sealer, Stream input, SecretKey key, CancellationToken cancellationToken, params EncryptionToken[] recipients)
-            => OperationPolicy.Default.RunAsync(_ => sealer.SealAsync(input, key, recipients), cancellationToken);
+            => OperationPolicy.Default.RunAsync("seal", _ => sealer.SealAsync(input, key, recipients), cancellationToken);
         public static Task<Stream> SealAsync(this IDataSealer sealer, Stream input, SecretKey key, EncryptionToken[] recipients, WebKey[] webKeys, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => sealer.SealAsync(input, key, recipients, webKeys), cancellationToken);
+            => OperationPolicy.Default.RunAsync("seal", _ => sealer.SealAsync(input, key, recipients, webKeys), cancellationToken);
         public static Task<UnsealResult> UnsealAsync(this IDataUnsealer unsealer, Stream input, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => unsealer.UnsealAsync(input), cancellationToken);
+            => OperationPolicy.Default.RunAsync("unseal", _ => unsealer.UnsealAsync(input), cancellationToken);
         public static Task<UnsealResult> UnsealAsync(this IDataUnsealer unsealer, Stream input, WebKey sender, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => unsealer.UnsealAsync(input, sender), cancellationToken);
+            => OperationPolicy.Default.RunAsync("unseal", _ => unsealer.UnsealAsync(input, sender), cancellationToken);
         public static Task<UnsealResult> UnsealAsync(this IDataUnsealer unsealer, Stream input, SecretKey key, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => unsealer.UnsealAsync(input, key), cancellationToken);
+            => OperationPolicy.Default.RunAsync("unseal", _ => unsealer.UnsealAsync(input, key), cancellationToken);
         public static Task<UnsealResult> UnsealAsync(this IDataUnsealer unsealer, Stream input, WebKey sender, SecretKey key, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => unsealer.UnsealAsync(input, sender, key), cancellationToken);
+            => OperationPolicy.Default.RunAsync("unseal", _ => unsealer.UnsealAsync(input, sender, key), cancellationToken);
         public static Task<SignatureSecurityInformation> VerifyAsync(this IDataVerifier verifier, Stream input, CancellationToken cancellationToken, WebKey sender = null)
-            => OperationPolicy.Default.RunAsync(_ => verifier.VerifyAsync(input, sender), cancellationToken);
+            => OperationPolicy.Default.RunAsync("verify", _ => verifier.VerifyAsync(input, sender), cancellationToken);
         public static Task<TimemarkedResult<SignatureSecurityInformation>> VerifyAsync(this ITmaDataVerifier verifier, Stream input, System.DateTime date, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => verifier.VerifyAsync(input, date), cancellationToken);
+            => OperationPolicy.Default.RunAsync("verify", _ => verifier.VerifyAsync(input, date), cancellationToken);
         public static Task<Stream> CompleteAsync(this IDataCompleter completer, Stream input, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => completer.CompleteAsync(input), cancellationToken);
+            => OperationPolicy.Default.RunAsync("complete", _ => completer.CompleteAsync(input), cancellationToken);
         public static Task<TimemarkedResult<Stream>> CompleteAsync(this ITmaDataCompleter completer, Stream input, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => completer.CompleteAsync(input), cancellationToken);
+            => OperationPolicy.Default.RunAsync("complete", _ => completer.CompleteAsync(input), cancellationToken);
         public static Task<CertificateSecurityInformation> VerifyAsync(this EncryptionToken token, bool checkRevocation, CancellationToken cancellationToken)
-            => OperationPolicy.Default.RunAsync(_ => token.VerifyAsync(checkRevocation), cancellationToken);
+            => OperationPolicy.Default.RunAsync("verify", _ => token.VerifyAsync(checkRevocation), cancellationToken);
     }
 }

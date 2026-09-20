@@ -11,6 +11,35 @@ Native signing, encryption, verification, decryption and completion stream paylo
 Native sealing now pipelines the nested CMS layers in one pass, eliminating its intermediate files and input replay. Unsealing is single-pass as well: the envelope is decrypted while the outer digest is computed, so nothing is spooled before inner verification/output. Payload I/O is asynchronous. Shared signer-key locks cover only the provider signature/verification call; hashing, encryption, copying and network validation do not hold those locks.
 
 The defaults are now a **16 MiB per-stream threshold**, **four shared complete operations**, and a **one-minute deadline**. The [latency/concurrency tuning guide](fargate-latency-tuning.md) contains the measurements for the 4-vCPU/16-GiB target, Server-GC results, and benchmark limits. All three values remain configurable.
+## Metrics
+
+The libraries publish metrics through `System.Diagnostics.Metrics` on the meter `Egelke.EHealth` (`EHealthMetrics.MeterName`). Nothing leaves the process unless the application subscribes.
+
+| Instrument | Type | Tags | Meaning |
+|---|---|---|---|
+| `ehealth.operations` | counter | `operation`, `outcome` | Completed top-level operations: `seal`, `unseal`, `verify`, `complete`, `chain`, `timestamp`, or the WCF port type name of a service call; outcome `ok`, `error` or `cancelled` |
+| `ehealth.operation.duration` | histogram, ms | `operation`, `outcome` | Duration including admission wait |
+| `ehealth.operation.queue.duration` | histogram, ms | `operation` | Time spent waiting for an admission slot |
+| `ehealth.operations.active` | up-down counter | `operation` | Admitted operations in progress |
+| `ehealth.chain.builds` | counter | `source` = `cache` or `platform` | Certificate paths served |
+| `ehealth.chain.build.duration` | histogram, ms | `source` | Platform chain build time |
+| `ehealth.revocation.downloads`, `.duration`, `.bytes` | counter, histogram, counter | `type` = `crl` or `ocsp`, `outcome` | Evidence downloads |
+| `ehealth.sts.requests`, `.duration` | counter, histogram | `type` = `issue` or `renew`, `outcome` | SAML token requests |
+| `ehealth.timestamp.requests`, `.duration` | counter, histogram | `outcome` | RFC 3161 requests |
+| `ehealth.revocation.cache.entries`, `.bytes`, `ehealth.chain.cache.entries` | observable gauges | | Cache sizes |
+
+A nested call (a chain build inside an unseal, a timestamp inside a seal, the STS inside a service call) is part of the enclosing operation; only the dedicated instruments above count it separately. Queue duration above a few milliseconds means `OperationPolicy` concurrency is the bottleneck; `platform` chain builds and evidence downloads should stay rare once the caches are warm.
+
+To reach CloudWatch, subscribe with OpenTelemetry and export OTLP to the AWS Distro for OpenTelemetry collector, whose `awsemf` exporter writes CloudWatch metrics, or to the CloudWatch agent's OTLP endpoint:
+
+```csharp
+services.AddOpenTelemetry().WithMetrics(metrics => metrics
+    .AddMeter(EHealthMetrics.MeterName)
+    .AddOtlpExporter());
+```
+
+Locally, `dotnet-counters monitor --counters Egelke.EHealth --process-id <pid>` shows the same instruments, and a `MeterListener` works without any package.
+
 ## Admission, cancellation and caching
 
 No configuration is required to use the defaults. To override them for the application, configure once at startup:
