@@ -179,7 +179,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 var recipients = new List<byte[]>();
                 foreach (var cert in certificates ?? Array.Empty<X509Certificate2>())
                 {
-                    using var publicKey = cert.GetRSAPublicKey(); if (publicKey == null) throw new CryptographicException("Recipient certificate must use RSA");
+                    if (PublicKeyCache.Get(cert) is not RSA publicKey) throw new CryptographicException("Recipient certificate must use RSA");
                     recipients.Add(KeyTransport(publicKey, key, cert, null));
                 }
                 foreach (var web in webKeys ?? Array.Empty<WebKey>())

@@ -126,8 +126,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 var algorithm = CryptoEncoding.ReadAlgorithm(info); byte[] signature = info.ReadOctetString();
                 if (info.HasData) info.ReadSetOf(true, CryptoEncoding.Context(1)); info.ThrowIfNotEmpty();
                 ValidateAlgorithmProtection(signer, digestAlgorithm, algorithm);
-                using var ownedKey = certificate == null ? null : CertVerifier.PublicKey(certificate);
-                var key = ownedKey ?? web.NativeKey;
+                var key = certificate == null ? web.NativeKey : PublicKeyCache.Get(certificate) ?? throw new CryptographicException("Unsupported signer key algorithm");
                 OperationScope.Cancellation.ThrowIfCancellationRequested();
                 if (!VerifyHash(key, digest, digestAlgorithm.Oid, algorithm, signature)) throw new CryptographicException("Invalid CMS signature");
             }

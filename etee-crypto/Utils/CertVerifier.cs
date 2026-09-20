@@ -17,7 +17,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         internal static async Task<CertificateSecurityInformation> VerifyAsync(this X509Certificate2 cert, DateTime time, int[] usages, int minimum, X509Certificate2Collection extra, IList<CertificateRevocationList> crls, IList<OcspResponse> ocsps)
         {
             var result = new CertificateSecurityInformation { Certificate = new X509Certificate2(cert) };
-            using (var key = PublicKey(cert)) if (!VerifyKeySize(key, minimum)) result.securityViolations.Add(CertSecurityViolation.NotValidKeySize);
+            if (!VerifyKeySize(cert, minimum)) result.securityViolations.Add(CertSecurityViolation.NotValidKeySize);
             if (usages.Any(bit => !CryptoEncoding.HasKeyUsage(cert, bit))) result.securityViolations.Add(CertSecurityViolation.NotValidForUsage);
             var derivedIssuer = ValidateAndGetDerivedIssuer(cert, extra);
             var chainSubject = derivedIssuer ?? cert;
@@ -26,7 +26,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             {
                 if (!CryptoEncoding.ValidAt(cert, time)) result.securityViolations.Add(CertSecurityViolation.NotTimeValid);
                 destination = new CertificateSecurityInformation(); result.IssuerInfo = destination;
-                using (var key = PublicKey(derivedIssuer)) if (!VerifyKeySize(key, minimum)) destination.securityViolations.Add(CertSecurityViolation.NotValidKeySize);
+                if (!VerifyKeySize(derivedIssuer, minimum)) destination.securityViolations.Add(CertSecurityViolation.NotValidKeySize);
                 if (!CryptoEncoding.HasKeyUsage(derivedIssuer, 0) || !CryptoEncoding.HasKeyUsage(derivedIssuer, 1)) destination.securityViolations.Add(CertSecurityViolation.NotValidForUsage);
             }
             Chain chain = crls != null || ocsps != null
@@ -59,7 +59,12 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         }
         internal static bool IsBetter(this X509Certificate2 self, X509Certificate2 other, DateTime time)
             => other == null || CryptoEncoding.ValidAt(self, time) && (!CryptoEncoding.ValidAt(other, time) || self.NotBefore > other.NotBefore);
-        internal static AsymmetricAlgorithm PublicKey(X509Certificate2 cert) => (AsymmetricAlgorithm)cert.GetRSAPublicKey() ?? cert.GetECDsaPublicKey() ?? (AsymmetricAlgorithm)cert.GetDSAPublicKey();
+        internal static bool VerifyKeySize(X509Certificate2 cert, int minimum)
+        {
+            int? bits = CryptoEncoding.PublicKeyBits(cert);
+            if (bits.HasValue) return bits.Value >= minimum;
+            return cert.PublicKey.Oid.Value == "1.2.840.10045.2.1" || VerifyKeySize(PublicKeyCache.Get(cert), minimum);
+        }
         internal static bool VerifyKeySize(AsymmetricAlgorithm key, int minimum) => key != null && (!(key is RSA || key is DSA) || key.KeySize >= minimum);
     }
 }

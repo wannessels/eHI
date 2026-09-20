@@ -55,6 +55,22 @@ namespace Egelke.EHealth.Client.Pki
             if (value.IsEmpty || (value.Span[0] & 128) != 0) throw new CryptographicException("Negative certificate serial number");
             return SerialKey(value.Span);
         }
+        /// <summary>Modulus bits of an RSA key or prime bits of a DSA key, read from the certificate's key encoding; null for other algorithms.</summary>
+        public static int? PublicKeyBits(X509Certificate2 certificate)
+        {
+            string oid = certificate.PublicKey.Oid.Value;
+            if (oid == Rsa) return Bits(Sequence(certificate.PublicKey.EncodedKeyValue.RawData).ReadIntegerBytes().Span);
+            if (oid == "1.2.840.10040.4.1") return Bits(Sequence(certificate.PublicKey.EncodedParameters.RawData).ReadIntegerBytes().Span);
+            return null;
+        }
+        private static int Bits(ReadOnlySpan<byte> integer)
+        {
+            int start = 0; while (start < integer.Length && integer[start] == 0) start++;
+            if (start == integer.Length) return 0;
+            int bits = (integer.Length - start) * 8;
+            for (byte top = integer[start]; (top & 0x80) == 0; top <<= 1) bits--;
+            return bits;
+        }
         public static bool ValidAt(X509Certificate2 cert, DateTime time) => cert.NotBefore.ToUniversalTime() <= time.ToUniversalTime() && cert.NotAfter.ToUniversalTime() >= time.ToUniversalTime();
         public static bool HasKeyUsage(X509Certificate2 cert, int bit)
         {
