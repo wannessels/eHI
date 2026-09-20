@@ -57,9 +57,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             return CryptoEncoding.SerialKey(CryptoEncoding.Serial(cert)) == CryptoEncoding.SerialKey(Convert.FromHexString(id.SerialNumber)) &&
                 CryptoEncoding.NamesEqual(new X500DistinguishedName(id.IssuerName).RawData, cert.IssuerName.RawData);
         }
-        internal static X509Certificate2 FindSigner(SignedCms cms)
+        internal static X509Certificate2 FindSigner(SignedCms cms, X509Certificate2Collection certificates)
         {
-            var signer = SingleSigner(cms); var matches = cms.Certificates.Cast<X509Certificate2>().Where(c => Matches(signer, c)).ToArray();
+            var signer = SingleSigner(cms); var matches = certificates.Cast<X509Certificate2>().Where(c => Matches(signer, c)).ToArray();
             if (matches.Length > 1) throw new InvalidMessageException("Ambiguous CMS signer certificate");
             return matches.SingleOrDefault();
         }

@@ -101,14 +101,22 @@ namespace Egelke.EHealth.Etee.Crypto
         protected async Task<SignatureSecurityInformation> VerifyCoreAsync(SignedCms cms, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider provider,
             Action<X509Certificate2, WebKey> verifySignature = null)
         {
+            // SignedCms decodes every embedded certificate on each Certificates access.
+            var certificates = cms.Certificates;
+            try { return await VerifyLayerAsync(cms, certificates, sender, outer, provider, verifySignature).ConfigureAwait(false); }
+            finally { foreach (X509Certificate2 certificate in certificates) certificate.Dispose(); }
+        }
+        private async Task<SignatureSecurityInformation> VerifyLayerAsync(SignedCms cms, X509Certificate2Collection certificates, WebKey sender, SignatureSecurityInformation outer, ITimemarkProvider provider,
+            Action<X509Certificate2, WebKey> verifySignature)
+        {
             var result = new SignatureSecurityInformation();
             if (cms.SignerInfos.Count == 0) { result.securityViolations.Add(SecurityViolation.NotSigned); return result; }
             var signer = NativeCms.SingleSigner(cms);
             if (!EteeActiveConfig.Unseal.SignatureAlgorithms.Any(a => a.DigestAlgorithm.Value == signer.DigestAlgorithm.Value && a.EncryptionAlgorithm.Value == signer.SignatureAlgorithm.Value))
                 result.securityViolations.Add(SecurityViolation.NotAllowedSignatureDigestAlgorithm);
-            var certificate = NativeCms.FindSigner(cms);
+            var certificate = NativeCms.FindSigner(cms, certificates);
             byte[] ski = NativeCms.KeyId(signer);
-            if (cms.Certificates.Count > 0 && certificate == null) { result.securityViolations.Add(SecurityViolation.NotFoundSigner); return result; }
+            if (certificates.Count > 0 && certificate == null) { result.securityViolations.Add(SecurityViolation.NotFoundSigner); return result; }
             if (outer != null && certificate != null)
             {
                 var previous = outer.Signer;
@@ -175,7 +183,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
             if (result.Subject == null && certificate != null)
             {
-                result.Subject = await certificate.VerifyAsync(signingTime, outer == null ? new[] { 0 } : Array.Empty<int>(), EteeActiveConfig.Unseal.MinimumSignatureKeySize, cms.Certificates, evidence.Item1, evidence.Item2).ConfigureAwait(false);
+                result.Subject = await certificate.VerifyAsync(signingTime, outer == null ? new[] { 0 } : Array.Empty<int>(), EteeActiveConfig.Unseal.MinimumSignatureKeySize, certificates, evidence.Item1, evidence.Item2).ConfigureAwait(false);
                 result.SubjectId = CryptoEncoding.SubjectKeyIdentifier(certificate);
             }
             return result;

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -117,19 +118,21 @@ namespace Egelke.EHealth.Etee.Crypto
         protected async Task<TimemarkKey> CompleteCoreAsync(SignedCms cms, X509Certificate2 provided, Level? requested)
         {
             var signer = NativeCms.SingleSigner(cms);
-            var certificate = NativeCms.FindSigner(cms) ?? provided;
+            var certificates = cms.Certificates;
+            var certificate = NativeCms.FindSigner(cms, certificates) ?? provided;
             var key = new TimemarkKey { Signer = certificate, SignerId = certificate != null ? CryptoEncoding.SubjectKeyIdentifier(certificate) : NativeCms.KeyId(signer), SigningTime = NativeCms.SigningTime(signer) ?? default, SignatureValue = signer.GetSignature() };
             if (key.SignerId == null) throw new InvalidMessageException("Missing signer identity");
             byte[] embeddedTimestamp = NativeCms.Attribute(signer.UnsignedAttributes, CryptoEncoding.TimestampAttribute);
             var timestamp = embeddedTimestamp?.ToTimeStampToken();
             if (key.SigningTime == default && timestamp != null) key.SigningTime = timestamp.TokenInfo.Timestamp.UtcDateTime;
-            if (requested != null && certificate != null && cms.Certificates.Count <= 1)
+            if (requested != null && certificate != null && certificates.Count <= 1)
             {
                 var chain = certificate.BuildChain(key.SigningTime == default ? DateTime.UtcNow : key.SigningTime, extraStore);
                 if (chain.ChainStatus.Any(status => status.Status != X509ChainStatusFlags.NoError)) throw new InvalidMessageException("Signer certificate chain failed validation");
+                var embedded = new HashSet<string>(certificates.Cast<X509Certificate2>().Select(c => c.Thumbprint));
                 foreach (var element in chain.ChainElements)
                 {
-                    if (!cms.Certificates.Contains(element.Certificate)) cms.AddCertificate(element.Certificate);
+                    if (embedded.Add(element.Certificate.Thumbprint)) cms.AddCertificate(element.Certificate);
                     element.Certificate.Dispose();
                 }
                 signer = NativeCms.SingleSigner(cms);

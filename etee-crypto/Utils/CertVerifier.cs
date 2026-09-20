@@ -16,7 +16,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             => cert.VerifyAsync(time, usages, minimum, extra, crls, ocsps).ConfigureAwait(false).GetAwaiter().GetResult();
         internal static async Task<CertificateSecurityInformation> VerifyAsync(this X509Certificate2 cert, DateTime time, int[] usages, int minimum, X509Certificate2Collection extra, IList<CertificateRevocationList> crls, IList<OcspResponse> ocsps)
         {
-            var result = new CertificateSecurityInformation { Certificate = new X509Certificate2(cert.RawData) };
+            var result = new CertificateSecurityInformation { Certificate = new X509Certificate2(cert) };
             using (var key = PublicKey(cert)) if (!VerifyKeySize(key, minimum)) result.securityViolations.Add(CertSecurityViolation.NotValidKeySize);
             if (usages.Any(bit => !CryptoEncoding.HasKeyUsage(cert, bit))) result.securityViolations.Add(CertSecurityViolation.NotValidForUsage);
             var derivedIssuer = ValidateAndGetDerivedIssuer(cert, extra);

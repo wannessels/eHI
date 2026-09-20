@@ -10,7 +10,7 @@ namespace Egelke.EHealth.Client.Pki
     /// <summary>Bounded cache of successfully built certificate paths, reused while every certificate in the path is valid at the requested time.</summary>
     public static class ChainCache
     {
-        private sealed class Entry { internal byte[][] Path; internal DateTime Expires; }
+        private sealed class Entry { internal X509Certificate2[] Path; internal DateTime Expires; }
         private static readonly ConcurrentDictionary<string, Entry> entries = new ConcurrentDictionary<string, Entry>();
         private static long hits, misses;
         /// <summary>How long a built path is reused, ten minutes by default; zero disables the cache.</summary>
@@ -33,7 +33,7 @@ namespace Egelke.EHealth.Client.Pki
                 foreach (string thumbprint in extraStore.Cast<X509Certificate2>().Select(c => c.Thumbprint).OrderBy(t => t, StringComparer.Ordinal)) key.Append('|').Append(thumbprint);
             return key.ToString();
         }
-        // Paths are handed out as fresh certificate instances because callers dispose them.
+        // Copies share the platform certificate handle, so a hit decodes nothing; callers dispose their copies.
         internal static Chain TryGet(string key, DateTime validationTime)
         {
             var chain = Lookup(key, validationTime);
@@ -44,18 +44,9 @@ namespace Egelke.EHealth.Client.Pki
         {
             if (!entries.TryGetValue(key, out var entry)) return null;
             if (entry.Expires <= DateTime.UtcNow) { entries.TryRemove(key, out _); return null; }
+            if (entry.Path.Any(certificate => !CryptoEncoding.ValidAt(certificate, validationTime))) return null;
             var chain = new Chain();
-            foreach (byte[] encoded in entry.Path)
-            {
-                var certificate = new X509Certificate2(encoded);
-                if (!CryptoEncoding.ValidAt(certificate, validationTime))
-                {
-                    certificate.Dispose();
-                    foreach (var element in chain.ChainElements) element.Certificate.Dispose();
-                    return null;
-                }
-                chain.ChainElements.Add(new ChainElement { Certificate = certificate });
-            }
+            foreach (var certificate in entry.Path) chain.ChainElements.Add(new ChainElement { Certificate = new X509Certificate2(certificate) });
             return chain;
         }
         internal static void Put(string key, Chain chain)
@@ -66,7 +57,7 @@ namespace Egelke.EHealth.Client.Pki
                 foreach (var stale in entries.Where(pair => pair.Value.Expires <= DateTime.UtcNow).ToArray()) entries.TryRemove(stale.Key, out _);
                 if (entries.Count >= EntryLimit) entries.Clear();
             }
-            entries[key] = new Entry { Path = chain.ChainElements.Select(element => element.Certificate.RawData).ToArray(), Expires = DateTime.UtcNow + Lifetime };
+            entries[key] = new Entry { Path = chain.ChainElements.Select(element => new X509Certificate2(element.Certificate)).ToArray(), Expires = DateTime.UtcNow + Lifetime };
         }
     }
 }
