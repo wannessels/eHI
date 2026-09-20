@@ -13,11 +13,6 @@ using Org.BouncyCastle.Security;
 
 internal static class CryptoProfiles
 {
-    internal static ISignatureFactory Native(RSA key)
-    {
-        var type = typeof(WebKey).Assembly.GetType("Egelke.EHealth.Etee.Crypto.Utils.NativeRsaPssSignatureFactory")!;
-        return (ISignatureFactory)Activator.CreateInstance(type, BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { key }, null)!;
-    }
     internal static byte[] Sign(ISignatureFactory factory, byte[] data)
     {
         var calculator = factory.CreateCalculator();
@@ -30,34 +25,34 @@ internal static class CryptoProfiles
         {
             using var key = RSA.Create(bits);
             var pair = DotNetUtilities.GetRsaKeyPair(key);
-            var factories = new[] { (Name: "bouncycastle", Factory: (ISignatureFactory)new Asn1SignatureFactory("SHA256WITHRSAANDMGF1", pair.Private)), (Name: "native", Factory: Native(key)) };
+            var managed = new Asn1SignatureFactory("SHA256WITHRSAANDMGF1", pair.Private);
+            var factories = new (string Name, Func<byte[], byte[]> Sign)[] { ("bouncycastle-oracle", data => Sign(managed, data)), ("platform", data => key.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pss)) };
             foreach (int size in new[] { 64, 256 * 1024 })
             {
                 byte[] data = RandomNumberGenerator.GetBytes(size);
                 foreach (var mode in factories)
                 {
-                    if (!key.VerifyData(data, Sign(mode.Factory, data), HashAlgorithmName.SHA256, RSASignaturePadding.Pss)) throw new Exception("Signature failed validation");
+                    if (!key.VerifyData(data, mode.Sign(data), HashAlgorithmName.SHA256, RSASignaturePadding.Pss)) throw new Exception("Signature failed validation");
                     await Program.MeasureAsync("signing", $"rsa{bits}-{mode.Name}", size, 200, () =>
                     {
-                        if (Sign(mode.Factory, data).Length != bits / 8) throw new Exception("Wrong signature length");
+                        if (mode.Sign(data).Length != bits / 8) throw new Exception("Wrong signature length");
                         return Task.CompletedTask;
                     });
                 }
             }
         }
-        foreach (bool native in new[] { false, true })
-            foreach (int size in new[] { 32 * 1024, 1024 * 1024, 1024 * 1024 + 1, 8 * 1024 * 1024 })
-                await RoundTripAsync(native, size, 1024 * 1024, "default-threshold");
+        foreach (int size in new[] { 32 * 1024, 1024 * 1024, 1024 * 1024 + 1, 8 * 1024 * 1024 })
+            await RoundTripAsync(size, 1024 * 1024, "default-threshold");
         foreach (int size in new[] { 1024 * 1024, 1024 * 1024 + 1, 8 * 1024 * 1024 })
-            await RoundTripAsync(true, size, 64 * 1024 * 1024, "memory-threshold");
+            await RoundTripAsync(size, 64 * 1024 * 1024, "memory-threshold");
     }
-    private static async Task RoundTripAsync(bool native, int size, long threshold, string scenario)
+    private static async Task RoundTripAsync(int size, long threshold, string scenario)
     {
-        bool previous = Settings.Default.UseNativeRsaPss;
+
         long previousThreshold = Settings.Default.InMemorySize;
         try
         {
-            Settings.Default.UseNativeRsaPss = native;
+
             Settings.Default.InMemorySize = threshold;
             using var key = RSA.Create(2048);
             var sender = new WebKey(key);
@@ -67,7 +62,7 @@ internal static class CryptoProfiles
             var bytes = RandomNumberGenerator.GetBytes(size);
             try
             {
-                await Program.MeasureAsync("cms-roundtrip", $"{(native ? "native" : "bouncycastle")}-{scenario}", size, size > 1024 * 1024 ? 12 : 40, async () =>
+                await Program.MeasureAsync("cms-roundtrip", $"platform-{scenario}", size, size > 1024 * 1024 ? 12 : 40, async () =>
                 {
                     using var input = new MemoryStream(bytes, false);
                     using var output = await sealer.SealAsync(input, recipient, Array.Empty<EncryptionToken>());
@@ -80,8 +75,8 @@ internal static class CryptoProfiles
                     }
                 });
             }
-            finally { (sealer as IDisposable)?.Dispose(); }
+            finally { (sealer as IDisposable)?.Dispose(); (receiver as IDisposable)?.Dispose(); }
         }
-        finally { Settings.Default.UseNativeRsaPss = previous; Settings.Default.InMemorySize = previousThreshold; }
+        finally { Settings.Default.InMemorySize = previousThreshold; }
     }
 }
