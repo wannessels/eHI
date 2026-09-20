@@ -149,7 +149,8 @@ namespace Egelke.EHealth.Client.Pki
             { using var key = signer.GetECDsaPublicKey(); return key != null && key.VerifyData(data, signature, HashName(digest), DSASignatureFormat.Rfc3279DerSequence); }
             using (var key = signer.GetDSAPublicKey()) return key != null && key.VerifyData(data, signature, HashName(digest), DSASignatureFormat.Rfc3279DerSequence);
         }
-        private static string ReadPssDigest(byte[] parameters)
+        /// <summary>Validates the platform-supported RSA-PSS parameter profile and returns its digest OID.</summary>
+        public static string ReadPssDigest(byte[] parameters)
         {
             string hash = Sha1, mgfHash = Sha1; int salt = 20, trailer = 1;
             if (parameters != null)

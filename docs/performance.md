@@ -2,11 +2,11 @@
 
 ## Native cryptography
 
-The libraries target .NET 8. Set `Settings.Default.UseNativeCrypto = true` for native message cryptography (the default), or `false` for BouncyCastle streaming. Native CMS favors throughput but buffers whole payloads internally; BouncyCastle streams large payloads through temporary files. The old signing-only flag has been removed. PKI, timestamp and revocation policy remain shared. See the [migration guide](native-crypto-migration.md) for exact scope, factory overrides and key-provider requirements.
+The libraries target .NET 8. Set `Settings.Default.UseNativeCrypto = true` for native message cryptography (the default), or `false` for BouncyCastle. Both backends stream large payloads through temporary files. The old signing-only flag has been removed. PKI, timestamp and revocation policy remain shared. See the [migration guide](native-crypto-migration.md) for exact scope, factory overrides and key-provider requirements.
 
 Dispose directly held factory-created sealers/unsealers after active operations finish, using `(instance as IDisposable)?.Dispose()`. Service clients retire and dispose their owned contexts automatically. Caller-owned certificates, stores and WebKeys must outlive active operations.
 
-Native signing/completion now keeps payloads separate from metadata and writes final output directly to its stream. An isolated Linux 8 MiB round trip reduced allocation from 296 MiB to 96 MiB and process peak working set from 493 MiB to 308 MiB; see the [measurement and remaining limits](native-memory-improvements.md). Native mode still needs payload-sized buffers, so tune admission concurrency to the task's memory budget.
+Native signing, encryption, verification, decryption and completion stream payloads. `InMemorySize` controls when each native stage spills to disk; known large stages start on disk. Native metadata decoding has a separate 16 MiB-per-layer default limit (`MaximumNativeMetadataSize`). Keep admission limits appropriate to the task's memory and temporary-storage budget. The [earlier allocation reductions](native-memory-improvements.md) are a historical comparison of the buffered implementation before this streaming change.
 ## Admission, cancellation and caching
 
 Use one shared policy for clients belonging to the same application capacity budget:

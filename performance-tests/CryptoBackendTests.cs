@@ -144,7 +144,7 @@ public class CryptoBackendTests
         {
             // Force direct file output, including for short DER lengths and AES padding boundaries.
             Settings.Default.InMemorySize = 0;
-            foreach (int size in new[] { 1, 15, 16, 17, 127, 128, 255, 256, 65535, 65536 })
+            foreach (int size in new[] { 0, 1, 15, 16, 17, 127, 128, 255, 256, 65535, 65536 })
             {
                 byte[] data = RandomNumberGenerator.GetBytes(size);
                 using var input = new MemoryStream(data); using var output = await sealer.SealAsync(input, secret, Array.Empty<EncryptionToken>());

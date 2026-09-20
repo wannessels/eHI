@@ -15,7 +15,7 @@ internal static class CryptoProfiles
 {
     // Run alone in a fresh process to compare process peak RSS without contamination
     // from earlier payload sizes or the other backend.
-    internal static Task NativeMemoryAsync() => RoundTripAsync(8 * 1024 * 1024, 1024 * 1024, "isolated-memory", true);
+    internal static Task NativeMemoryAsync(int payloadMiB = 8) => RoundTripAsync(checked(payloadMiB * 1024 * 1024), 1024 * 1024, "isolated-memory", true);
 
     internal static byte[] Sign(ISignatureFactory factory, byte[] data)
     {

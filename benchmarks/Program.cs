@@ -36,7 +36,11 @@ internal static class Program
         try
         {
             if (suite is "all" or "crypto") await CryptoProfiles.RunAsync();
-            if (suite == "native-memory") await CryptoProfiles.NativeMemoryAsync();
+            if (suite == "native-memory")
+            {
+                int sizeIndex = Array.IndexOf(args, "--payload-mib");
+                await CryptoProfiles.NativeMemoryAsync(sizeIndex < 0 ? 8 : int.Parse(args[sizeIndex + 1]));
+            }
             if (suite is "all" or "memory") await MemoryProfiles.RunAsync();
             if (suite is "all" or "http") httpDetails = await HttpProfiles.RunAsync();
         }

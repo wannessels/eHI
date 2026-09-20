@@ -46,20 +46,24 @@ namespace Egelke.EHealth.Etee.Crypto
         protected virtual async Task<UnsealResult> UnsealCoreAsync(Stream data, WebKey sender, SecretKey key)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
-            var outer = NativeCms.Decode(NativeCms.Read(data));
-            var outerStatus = await VerifyCoreAsync(outer, sender, null, timemark).ConfigureAwait(false);
-            var encrypted = NativeEnvelope.Decrypt(outer.ContentInfo.Content, encryptionCertificates, ownKeys, key, outerStatus.SigningTime ?? DateTime.UtcNow);
+            using var envelope = new CryptoSpool(CryptoSpool.Remaining(data));
+            var outer = NativeStreamingCms.Read(data, envelope);
+            var outerStatus = await VerifyCoreAsync(outer.Metadata, sender, null, timemark, outer.Verify).ConfigureAwait(false);
+            envelope.Position = 0;
+            using var signedContent = new CryptoSpool(envelope.Length);
+            var encrypted = NativeEnvelope.Decrypt(envelope, signedContent, encryptionCertificates, ownKeys, key, outerStatus.SigningTime ?? DateTime.UtcNow);
             var encryptionStatus = new SecurityInformation { SubjectId = encrypted.KeyId };
             if (encrypted.Certificate != null)
                 encryptionStatus.Subject = await encrypted.Certificate.VerifyAsync(outerStatus.SigningTime ?? DateTime.UtcNow, new[] { 2, 3 }, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey, authenticationCertificates, null, null).ConfigureAwait(false);
             else if (encrypted.KeySize < (key != null ? EteeActiveConfig.Unseal.MinimumEncryptionKeySize.SymmetricRecipientKey : EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey))
                 encryptionStatus.securityViolations.Add(SecurityViolation.NotAllowedEncryptionKeySize);
-            var inner = NativeCms.Decode(encrypted.Content);
-            var innerStatus = await VerifyCoreAsync(inner, sender, outerStatus, timemark).ConfigureAwait(false);
-            Stream clear = inner.ContentInfo.Content.Length <= Settings.Default.InMemorySize ? new MemoryStream(inner.ContentInfo.Content, false) : new TempFileStreamFactory().CreateNew();
+            signedContent.Position = 0;
+            var clear = new CryptoSpool(signedContent.Length);
             try
             {
-                if (!(clear is MemoryStream)) { using var source = new MemoryStream(inner.ContentInfo.Content, false); OperationScope.Copy(source, clear); clear.Position = 0; }
+                var inner = NativeStreamingCms.Read(signedContent, clear);
+                var innerStatus = await VerifyCoreAsync(inner.Metadata, sender, outerStatus, timemark, inner.Verify).ConfigureAwait(false);
+                clear.Position = 0;
                 return new UnsealResult { UnsealedData = clear, SecurityInformation = new UnsealSecurityInformation { OuterSignature = outerStatus, Encryption = encryptionStatus, InnerSignature = innerStatus } };
             }
             catch { clear.Dispose(); throw; }
@@ -73,7 +77,8 @@ namespace Egelke.EHealth.Etee.Crypto
         protected virtual Task<SignatureSecurityInformation> VerifyMessageAsync(Stream data, WebKey sender, ITimemarkProvider provider)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
-            return VerifyCoreAsync(NativeCms.Decode(NativeCms.Read(data)), sender, null, provider);
+            var parsed = NativeStreamingCms.Read(data, Stream.Null);
+            return VerifyCoreAsync(parsed.Metadata, sender, null, provider, parsed.Verify);
         }
         public SignatureSecurityInformation Verify(Stream data, DateTime date) => VerifyAsync(data, date).GetAwaiter().GetResult();
         public Task<SignatureSecurityInformation> VerifyAsync(Stream data, DateTime date) => VerifyAsync(data, null, new FixedTimemarkProvider(date));

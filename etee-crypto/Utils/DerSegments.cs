@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using Egelke.EHealth.Client.Pki;
-using Egelke.EHealth.Etee.Crypto.Configuration;
 
 namespace Egelke.EHealth.Etee.Crypto.Utils
 {
@@ -12,6 +11,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         private readonly byte? tag;
         private readonly ReadOnlyMemory<byte> bytes;
         private readonly DerSegments[] children;
+        private Stream source;
+        private long sourcePosition;
+        private Action<Stream> generate;
         private readonly long contentLength;
         private long EncodedLength => tag.HasValue ? checked(1 + LengthBytes(contentLength) + contentLength) : contentLength;
 
@@ -24,20 +26,26 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         internal static DerSegments Encoded(ReadOnlyMemory<byte> bytes) => new(null, bytes, null);
         internal static DerSegments Value(byte tag, ReadOnlyMemory<byte> bytes) => new(tag, bytes, null);
         internal static DerSegments Constructed(byte tag, params DerSegments[] children) => new(tag, default, children);
+        internal static DerSegments Value(byte tag, Stream source)
+        {
+            if (source.Position > source.Length) throw new InvalidMessageException("CMS source position exceeds its length");
+            var segment = new DerSegments(tag, default, null, source.Length - source.Position);
+            segment.source = source; segment.sourcePosition = source.Position; return segment;
+        }
+        internal static DerSegments Generated(byte tag, long length, Action<Stream> write)
+        {
+            if (length < 0) throw new ArgumentOutOfRangeException(nameof(length));
+            return new DerSegments(tag, default, null, length) { generate = write };
+        }
+        private DerSegments(byte tag, ReadOnlyMemory<byte> bytes, DerSegments[] children, long length)
+            : this(tag, bytes, children) { contentLength = length; }
 
         internal byte[] Encode()
         {
             var result = new byte[checked((int)EncodedLength)];
             using var output = new MemoryStream(result, true); Write(output); return result;
         }
-        internal Stream ToStream()
-        {
-            if (EncodedLength <= Settings.Default.InMemorySize) return new MemoryStream(Encode(), false);
-            var stream = new TempFileStreamFactory().CreateNew();
-            try { Write(stream); stream.Position = 0; return stream; }
-            catch { stream.Dispose(); throw; }
-        }
-        private void Write(Stream output)
+        internal void Write(Stream output)
         {
             OperationScope.Cancellation.ThrowIfCancellationRequested();
             if (tag.HasValue)
@@ -61,6 +69,16 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 output.Write(remaining.Span.Slice(0, count)); remaining = remaining.Slice(count);
             }
             if (children != null) foreach (var child in children) child.Write(output);
+            if (source != null)
+            {
+                if (source.Length - sourcePosition != contentLength) throw new InvalidOperationException("CMS source changed length");
+                source.Position = sourcePosition; OperationScope.Copy(source, output);
+            }
+            if (generate != null)
+            {
+                long start = output.Position; generate(output);
+                if (output.Position - start != contentLength) throw new InvalidOperationException("Unexpected CMS content length");
+            }
         }
         private static int LengthBytes(long length)
         {

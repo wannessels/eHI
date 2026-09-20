@@ -63,6 +63,14 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         /// </value>
         public long InMemorySize { get; set; }
 
+        private int maximumNativeMetadataSize = 16 * 1024 * 1024;
+        /// <summary>Maximum aggregate encoded metadata decoded per native CMS layer, excluding payloads. Defaults to 16 MiB.</summary>
+        public int MaximumNativeMetadataSize
+        {
+            get => System.Threading.Volatile.Read(ref maximumNativeMetadataSize);
+            set { if (value <= 0) throw new ArgumentOutOfRangeException(nameof(value)); System.Threading.Volatile.Write(ref maximumNativeMetadataSize, value); }
+        }
+
         /// <summary>
         /// Number of times the outer signature is retried after a CryptographicException, with a back-off of 10^n ms.
         /// </summary>

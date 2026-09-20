@@ -98,6 +98,7 @@ public class NativePkiInteroperabilityTests
             {
                 using var buffer = new MemoryStream(); output.CopyTo(buffer);
                 var signed = new SignedCms(); signed.Decode(buffer.ToArray());
+                signed.CheckSignature(verifySignatureOnly: true); // Independent platform CMS oracle for the streamed signer.
                 byte[] originalSignature = signed.SignerInfos[0].GetSignature();
                 signed.RemoveCertificate(rootCert); // The completer must not duplicate the remaining signer certificate.
                 using var source = new MemoryStream(signed.Encode());
