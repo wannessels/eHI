@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using Egelke.EHealth.Client.Pki;
 
 namespace Egelke.EHealth.Etee.Crypto.Utils
@@ -13,7 +14,6 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         private readonly DerSegments[] children;
         private Stream source;
         private long sourcePosition;
-        private Action<Stream> generate;
         private readonly long contentLength;
         private long EncodedLength => tag.HasValue ? checked(1 + LengthBytes(contentLength) + contentLength) : contentLength;
 
@@ -31,11 +31,6 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             if (source.Position > source.Length) throw new InvalidMessageException("CMS source position exceeds its length");
             var segment = new DerSegments(tag, default, null, source.Length - source.Position);
             segment.source = source; segment.sourcePosition = source.Position; return segment;
-        }
-        internal static DerSegments Generated(byte tag, long length, Action<Stream> write)
-        {
-            if (length < 0) throw new ArgumentOutOfRangeException(nameof(length));
-            return new DerSegments(tag, default, null, length) { generate = write };
         }
         private DerSegments(byte tag, ReadOnlyMemory<byte> bytes, DerSegments[] children, long length)
             : this(tag, bytes, children) { contentLength = length; }
@@ -74,10 +69,28 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 if (source.Length - sourcePosition != contentLength) throw new InvalidOperationException("CMS source changed length");
                 source.Position = sourcePosition; OperationScope.Copy(source, output);
             }
-            if (generate != null)
+        }
+        internal async Task WriteAsync(Stream output)
+        {
+            var token = OperationScope.Cancellation; token.ThrowIfCancellationRequested();
+            if (tag.HasValue)
             {
-                long start = output.Position; generate(output);
-                if (output.Position - start != contentLength) throw new InvalidOperationException("Unexpected CMS content length");
+                byte[] header = new byte[10]; header[0] = tag.Value;
+                int count = LengthBytes(contentLength);
+                if (count == 1) header[1] = (byte)contentLength;
+                else
+                {
+                    header[1] = (byte)(0x80 | (count - 1)); long length = contentLength;
+                    for (int index = count; index >= 2; index--) { header[index] = (byte)length; length >>= 8; }
+                }
+                await output.WriteAsync(header.AsMemory(0, 1 + count), token).ConfigureAwait(false);
+            }
+            await output.WriteAsync(bytes, token).ConfigureAwait(false);
+            if (children != null) foreach (var child in children) await child.WriteAsync(output).ConfigureAwait(false);
+            if (source != null)
+            {
+                if (source.Length - sourcePosition != contentLength) throw new InvalidOperationException("CMS source changed length");
+                source.Position = sourcePosition; await OperationScope.CopyAsync(source, output).ConfigureAwait(false);
             }
         }
         private static int LengthBytes(long length)

@@ -7,6 +7,8 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Security.Cryptography.Pkcs;
 using System.Security.Cryptography.X509Certificates;
+using System.Threading;
+using System.Threading.Tasks;
 using Egelke.EHealth.Client.Pki;
 
 namespace Egelke.EHealth.Etee.Crypto.Utils
@@ -31,8 +33,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             finally { ArrayPool<byte>.Shared.Return(buffer, true); }
         }
         internal static SignedCms Sign(Stream content, X509Certificate2 certificate, AsymmetricAlgorithm key, byte[] id)
+            => SignDigest(Hash(content, HashAlgorithmName.SHA256), certificate, key, id);
+        internal static SignedCms SignDigest(byte[] digest, X509Certificate2 certificate, AsymmetricAlgorithm key, byte[] id)
         {
-            byte[] digest = Hash(content, HashAlgorithmName.SHA256);
             var attributes = new AsnWriter(AsnEncodingRules.DER);
             using (attributes.PushSetOf())
             {
@@ -179,7 +182,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             }
         }
 
-        internal static Parsed Read(Stream input, Stream content)
+        internal static async Task<Parsed> ReadAsync(Stream input, Stream content)
         {
             var reader = new BerStreamReader(input);
             reader.Enter(0x30); byte[] type = reader.ReadEncoded(); ExpectOid(type, CryptoEncoding.SignedData);
@@ -197,7 +200,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 }
                 reader.Enter(0x30); byte[] contentType = reader.ReadEncoded(); ExpectOid(contentType, CryptoEncoding.Data);
                 reader.Enter(0xA0);
-                reader.CopyOctets(new HashWriter(content, hashes.Values.ToArray()));
+                using var payload = reader.OpenOctets();
+                var destination = new HashWriter(content, hashes.Values.ToArray());
+                await OperationScope.CopyAsync(payload, destination).ConfigureAwait(false);
                 reader.Leave(); reader.Leave();
                 var fields = new List<DerSegments> { DerSegments.Encoded(version), DerSegments.Encoded(algorithms), DerSegments.Constructed(0x30, DerSegments.Encoded(contentType)) };
                 if (reader.HasData && reader.PeekTag() == 0xA0) fields.Add(DerSegments.Encoded(reader.ReadEncoded()));
@@ -222,6 +227,10 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             private readonly Stream output; private readonly IncrementalHash[] hashes;
             internal HashWriter(Stream output, IncrementalHash[] hashes) { this.output = output; this.hashes = hashes; }
             public override void Write(byte[] buffer, int offset, int count) { foreach (var hash in hashes) hash.AppendData(buffer, offset, count); output.Write(buffer, offset, count); }
+            public override void Write(ReadOnlySpan<byte> buffer) { foreach (var hash in hashes) hash.AppendData(buffer); output.Write(buffer); }
+            public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken token = default)
+            { foreach (var hash in hashes) hash.AppendData(buffer.Span); return output.WriteAsync(buffer, token); }
+            public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token) => WriteAsync(buffer.AsMemory(offset, count), token).AsTask();
             public override bool CanRead => false; public override bool CanSeek => false; public override bool CanWrite => true;
             public override long Length => throw new NotSupportedException(); public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
             public override void Flush() => output.Flush(); public override int Read(byte[] b, int o, int c) => throw new NotSupportedException();

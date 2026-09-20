@@ -26,8 +26,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
     internal class WindowsTempFileStream : FileStream
     {
 
-        internal WindowsTempFileStream()
-            : base(Path.GetTempFileName(), FileMode.Open, FileAccess.ReadWrite, FileShare.None, 64 * 1024, FileOptions.DeleteOnClose)
+        internal WindowsTempFileStream(bool asynchronous = false)
+            : base(Path.GetTempFileName(), FileMode.Open, FileAccess.ReadWrite, FileShare.None, 64 * 1024,
+                  FileOptions.DeleteOnClose | FileOptions.SequentialScan | (asynchronous ? FileOptions.Asynchronous : FileOptions.None))
         {
 
         }

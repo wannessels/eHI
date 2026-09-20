@@ -60,6 +60,23 @@ namespace Egelke.EHealth.Client.Pki
             }
             finally { System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
         }
+        /// <summary>Copies asynchronously with the current deadline without owning either stream.</summary>
+        public static async Task CopyAsync(System.IO.Stream input, System.IO.Stream output)
+        {
+            var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(81920);
+            var cancellation = Cancellation;
+            try
+            {
+                while (true)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    int read = await input.ReadAsync(buffer.AsMemory(), cancellation).ConfigureAwait(false);
+                    if (read == 0) break;
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellation).ConfigureAwait(false);
+                }
+            }
+            finally { System.Buffers.ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
+        }
         /// <summary>Restores the enclosing operation scope.</summary>
         public void Dispose() { current.Value = previous; source.Dispose(); }
     }

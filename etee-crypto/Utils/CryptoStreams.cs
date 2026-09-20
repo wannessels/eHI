@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Etee.Crypto.Configuration;
 
@@ -13,14 +15,14 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         private readonly long threshold = Math.Max(0, Settings.Default.InMemorySize);
         internal CryptoSpool(long expectedLength = 0)
         {
-            if (expectedLength > threshold) { storage.Dispose(); storage = new TempFileStreamFactory().CreateNew(); }
+            if (expectedLength > threshold) { storage.Dispose(); storage = new WindowsTempFileStream(true); }
         }
         internal static long Remaining(Stream stream) => stream.CanSeek ? Math.Max(0, stream.Length - stream.Position) : 0;
         private void Reserve(int count)
         {
             if (storage is MemoryStream && Math.Max(storage.Length, checked(storage.Position + count)) > threshold)
             {
-                var file = new TempFileStreamFactory().CreateNew();
+                var file = new WindowsTempFileStream(true);
                 try { long position = storage.Position; storage.Position = 0; OperationScope.Copy(storage, file); file.Position = position; }
                 catch { file.Dispose(); throw; }
                 storage.Dispose(); storage = file;
@@ -28,6 +30,20 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         }
         public override void Write(byte[] buffer, int offset, int count) { Reserve(count); storage.Write(buffer, offset, count); }
         public override void Write(ReadOnlySpan<byte> buffer) { Reserve(buffer.Length); storage.Write(buffer); }
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken token = default)
+        {
+            if (storage is MemoryStream && Math.Max(storage.Length, checked(storage.Position + buffer.Length)) > threshold)
+            {
+                var file = new WindowsTempFileStream(true);
+                try { long position = storage.Position; storage.Position = 0; await storage.CopyToAsync(file, 81920, token).ConfigureAwait(false); file.Position = position; }
+                catch { file.Dispose(); throw; }
+                storage.Dispose(); storage = file;
+            }
+            await storage.WriteAsync(buffer, token).ConfigureAwait(false);
+        }
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token) => WriteAsync(buffer.AsMemory(offset, count), token).AsTask();
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default) => storage.ReadAsync(buffer, token);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token) => storage.ReadAsync(buffer, offset, count, token);
         public override int Read(byte[] buffer, int offset, int count) => storage.Read(buffer, offset, count);
         public override int Read(Span<byte> buffer) => storage.Read(buffer);
         public override int ReadByte() => storage.ReadByte();
@@ -44,20 +60,5 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         public override bool CanSeek => storage.CanSeek;
         public override void Flush() => storage.Flush();
         protected override void Dispose(bool disposing) { if (disposing) storage.Dispose(); base.Dispose(disposing); }
-    }
-
-    internal sealed class SeekableCryptoInput : IDisposable
-    {
-        internal Stream Stream { get; }
-        private readonly bool owned;
-        internal SeekableCryptoInput(Stream input)
-        {
-            OperationScope.Cancellation.ThrowIfCancellationRequested();
-            if (input.CanSeek) { Stream = input; return; }
-            Stream = new CryptoSpool(); owned = true;
-            try { OperationScope.Copy(input, Stream); Stream.Position = 0; }
-            catch { Stream.Dispose(); throw; }
-        }
-        public void Dispose() { if (owned) Stream.Dispose(); }
     }
 }

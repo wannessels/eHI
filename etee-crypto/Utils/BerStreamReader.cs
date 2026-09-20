@@ -2,6 +2,8 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Etee.Crypto.Configuration;
 
@@ -115,20 +117,51 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             while (HasData) CopyMetadata(output, Header(), buffer);
             Leave(); if (!header.Length.HasValue) { Charge(2); output.WriteByte(0); output.WriteByte(0); }
         }
-        internal void CopyOctets(Stream output, int primitiveTag = 0x04)
+        internal OctetStream OpenOctets(int primitiveTag = 0x04) => new(this, primitiveTag);
+        internal sealed class OctetStream : Stream
         {
-            byte[] buffer = ArrayPool<byte>.Shared.Rent(81920);
-            try { CopyOctets(output, primitiveTag, buffer); }
-            finally { ArrayPool<byte>.Shared.Return(buffer, true); }
-        }
-        private void CopyOctets(Stream output, int primitiveTag, byte[] buffer)
-        {
-            var header = Header();
-            if (header.Tag == primitiveTag && header.Length.HasValue) { Copy(output, header.Length.Value, buffer); return; }
-            if (header.Tag != (primitiveTag | 32)) throw Invalid();
-            Enter(header.Length);
-            while (HasData) CopyOctets(output, 0x04, buffer);
-            Leave();
+            private readonly BerStreamReader reader;
+            private long remaining;
+            private int depth;
+            internal bool Finished { get; private set; }
+            internal OctetStream(BerStreamReader reader, int tag) { this.reader = reader; Segment(tag); }
+            private void Segment(int tag)
+            {
+                var header = reader.Header();
+                if (header.Tag == tag && header.Length.HasValue) { remaining = header.Length.Value; return; }
+                if (header.Tag != (tag | 32)) throw Invalid(); reader.Enter(header.Length); depth++;
+            }
+            private bool Advance()
+            {
+                if (Finished) return false;
+                while (remaining == 0)
+                {
+                    if (depth == 0) { Finished = true; return false; }
+                    if (reader.HasData) Segment(0x04);
+                    else { reader.Leave(); depth--; }
+                }
+                return true;
+            }
+            public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+            public override int Read(Span<byte> buffer)
+            {
+                OperationScope.Cancellation.ThrowIfCancellationRequested();
+                if (buffer.IsEmpty || !Advance()) return 0;
+                int read = reader.input.Read(buffer.Slice(0, (int)Math.Min(buffer.Length, remaining)));
+                if (read == 0) throw Invalid(); reader.position += read; remaining -= read; return read;
+            }
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+            {
+                token.ThrowIfCancellationRequested();
+                if (buffer.IsEmpty || !Advance()) return 0;
+                int read = await reader.input.ReadAsync(buffer.Slice(0, (int)Math.Min(buffer.Length, remaining)), token).ConfigureAwait(false);
+                if (read == 0) throw Invalid(); reader.position += read; remaining -= read; return read;
+            }
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token) => ReadAsync(buffer.AsMemory(offset, count), token).AsTask();
+            public override bool CanRead => true; public override bool CanWrite => false; public override bool CanSeek => false;
+            public override long Length => throw new NotSupportedException(); public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+            public override void Flush() { } public override void Write(byte[] b, int o, int c) => throw new NotSupportedException();
+            public override long Seek(long o, SeekOrigin s) => throw new NotSupportedException(); public override void SetLength(long n) => throw new NotSupportedException();
         }
     }
 }

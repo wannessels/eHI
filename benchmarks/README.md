@@ -45,3 +45,12 @@ The [selectable backend report](../docs/backend-crypto-performance.md) compares 
 The [native memory improvement report](../docs/native-memory-improvements.md) compares the optimized native implementation with its immediate predecessor in fresh processes. Use `-Suite native-memory` to reproduce that isolated scenario.
 
 The [native streaming report](../docs/native-streaming-performance.md) measures the current implementation at 8 MiB and 32 MiB and compares it with the prior buffered native backend. It includes the observed memory/latency trade-off.
+
+## Concurrent crypto
+
+```powershell
+./benchmarks/run-linux.ps1 -Suite crypto-concurrency -CpuLimit 2 -PayloadKiB 8192 -Concurrency 4 -Requests 32
+./benchmarks/run-linux.ps1 -Suite crypto-concurrency -CpuLimit 2 -PayloadKiB 32 -Concurrency 8 -Requests 256
+```
+
+The executable accepts `--suite crypto-concurrency --payload-kib 8192 --concurrency 4 --requests 32`. Each scenario should run in a fresh process. Closed-loop workers share a sealer, unsealer, RSA-2048 key and immutable input, matching client context reuse. One shared admission policy bounds the complete seal/unseal request. Five warm-up requests precede three measured rounds. Workers wait on a start barrier; request latency includes admission and both crypto operations, and throughput is completed requests per second. Per-request mean/p50/p95, allocations, CPU and process peak memory appear under `concurrencyDetails`. This measures steady concurrency, not an external arrival-rate/overload queue or live SOAP service.

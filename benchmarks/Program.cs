@@ -33,6 +33,7 @@ internal static class Program
             Notes = "Release, warmed scenarios; process-wide allocations include server allocations for HTTP; peak working set is cumulative. Local Docker is not AWS Fargate."
         };
         object? httpDetails = null;
+        object? concurrencyDetails = null;
         try
         {
             if (suite is "all" or "crypto") await CryptoProfiles.RunAsync();
@@ -43,11 +44,16 @@ internal static class Program
             }
             if (suite is "all" or "memory") await MemoryProfiles.RunAsync();
             if (suite is "all" or "http") httpDetails = await HttpProfiles.RunAsync();
+            if (suite == "crypto-concurrency")
+            {
+                int Option(string name, int fallback) { int index = Array.IndexOf(args, name); return index < 0 ? fallback : int.Parse(args[index + 1]); }
+                concurrencyDetails = await ConcurrentCryptoProfiles.RunAsync(Option("--payload-kib", 8192) * 1024, Option("--concurrency", 4), Option("--requests", Quick ? 8 : 32));
+            }
         }
         finally
         {
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(output))!);
-            await File.WriteAllTextAsync(output, JsonSerializer.Serialize(new { metadata, results = Results, httpDetails }, new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(output, JsonSerializer.Serialize(new { metadata, results = Results, httpDetails, concurrencyDetails }, new JsonSerializerOptions { WriteIndented = true }));
         }
     }
     private static string? ReadIfExists(string path) => File.Exists(path) ? File.ReadAllText(path).Trim() : null;

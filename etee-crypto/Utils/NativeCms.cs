@@ -151,9 +151,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
     {
         private const string Aes128Cbc = "2.16.840.1.101.3.4.1.2";
         private static string WrapOid(int size) => size switch { 16 => "2.16.840.1.101.3.4.1.5", 24 => "2.16.840.1.101.3.4.1.25", 32 => "2.16.840.1.101.3.4.1.45", _ => throw new CryptographicException("Unsupported AES key size") };
-        internal static void Encrypt(Stream content, Stream output, X509Certificate2[] certificates, WebKey[] webKeys, SecretKey secret)
+        internal static EncryptionSession OpenEncryption(Stream output, X509Certificate2[] certificates, WebKey[] webKeys, SecretKey secret)
         {
-            using var aes = Aes.Create(); aes.KeySize = 128; aes.GenerateKey(); aes.GenerateIV();
+            var aes = Aes.Create(); aes.KeySize = 128; aes.GenerateKey(); aes.GenerateIV();
             byte[] key = aes.Key;
             try
             {
@@ -179,7 +179,6 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 }
                 if (recipients.Count == 0) throw new ArgumentException("At least one recipient is required");
                 OperationScope.Cancellation.ThrowIfCancellationRequested();
-                long encryptedLength = checked(((content.Length - content.Position) / 16 + 1) * 16);
                 var type = new AsnWriter(AsnEncodingRules.DER); type.WriteObjectIdentifier(CryptoEncoding.EnvelopedData);
                 var version = new AsnWriter(AsnEncodingRules.DER); version.WriteInteger(secret == null && (webKeys == null || webKeys.Length == 0) ? 0 : 2);
                 var recipientSet = new AsnWriter(AsnEncodingRules.DER);
@@ -187,17 +186,38 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 var contentType = new AsnWriter(AsnEncodingRules.DER); contentType.WriteObjectIdentifier(CryptoEncoding.Data);
                 var algorithm = new AsnWriter(AsnEncodingRules.DER);
                 using (algorithm.PushSequence()) { algorithm.WriteObjectIdentifier(Aes128Cbc); algorithm.WriteOctetString(aes.IV); }
-                DerSegments.Constructed(0x30, DerSegments.Encoded(type.Encode()), DerSegments.Constructed(0xA0,
-                    DerSegments.Constructed(0x30, DerSegments.Encoded(version.Encode()), DerSegments.Encoded(recipientSet.Encode()),
-                        DerSegments.Constructed(0x30, DerSegments.Encoded(contentType.Encode()), DerSegments.Encoded(algorithm.Encode()),
-                            DerSegments.Generated(0x80, encryptedLength, destination =>
-                            {
-                                using var transform = aes.CreateEncryptor();
-                                using var crypto = new CryptoStream(destination, transform, CryptoStreamMode.Write, true);
-                                OperationScope.Copy(content, crypto); crypto.FlushFinalBlock();
-                            }))))).Write(output);
+                BerOctetWriter.Begin(output, 0x30); output.Write(type.Encode());
+                BerOctetWriter.Begin(output, 0xA0); BerOctetWriter.Begin(output, 0x30);
+                output.Write(version.Encode()); output.Write(recipientSet.Encode());
+                BerOctetWriter.Begin(output, 0x30); output.Write(contentType.Encode()); output.Write(algorithm.Encode());
+                return new EncryptionSession(aes, output);
             }
+            catch { aes.Dispose(); throw; }
             finally { CryptographicOperations.ZeroMemory(key); }
+        }
+        internal sealed class EncryptionSession : IDisposable
+        {
+            private readonly Aes aes;
+            private readonly Stream output;
+            private readonly BerOctetWriter payload;
+            private readonly ICryptoTransform transform;
+            internal CryptoStream Content { get; }
+            internal EncryptionSession(Aes aes, Stream output)
+            {
+                this.aes = aes; this.output = output;
+                payload = new BerOctetWriter(output, 0xA0);
+                transform = aes.CreateEncryptor(); Content = new CryptoStream(payload, transform, CryptoStreamMode.Write, true);
+            }
+            internal async System.Threading.Tasks.Task CompleteAsync()
+            {
+                await Content.FlushFinalBlockAsync(OperationScope.Cancellation).ConfigureAwait(false);
+                await payload.CompleteAsync().ConfigureAwait(false); BerOctetWriter.End(output, 4);
+            }
+            public void Dispose()
+            {
+                try { Content.Dispose(); }
+                finally { payload.Dispose(); transform.Dispose(); aes.Dispose(); }
+            }
         }
         private static byte[] KeyTransport(RSA rsa, byte[] key, X509Certificate2 cert, byte[] id)
         {
@@ -212,15 +232,29 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             }
             return writer.Encode();
         }
-        internal sealed class Decryption
+        internal sealed class Decryption : IDisposable
         {
             internal byte[] KeyId;
             internal X509Certificate2 Certificate;
             internal AsymmetricAlgorithm PublicKey;
             internal string KeyAlgorithm;
             internal int KeySize;
+            internal CryptoStream Content;
+            internal BerStreamReader Framing;
+            internal Aes Aes;
+            internal ICryptoTransform Transform;
+            internal void Complete()
+            {
+                if (Content.ReadByte() != -1) throw new InvalidMessageException("Unexpected decrypted trailing content");
+                Framing.Leave(); Framing.Leave(); Framing.Leave(); Framing.Leave(); Framing.End();
+            }
+            public void Dispose()
+            {
+                try { Content?.Dispose(); }
+                finally { Transform?.Dispose(); Aes?.Dispose(); }
+            }
         }
-        internal static Decryption Decrypt(Stream input, Stream output, X509Certificate2Collection certificates, WebKey[] webKeys, SecretKey secret, DateTime date)
+        internal static Decryption OpenDecryption(Stream input, X509Certificate2Collection certificates, WebKey[] webKeys, SecretKey secret, DateTime date)
         {
             var framing = new BerStreamReader(input);
             framing.Enter(0x30); NativeStreamingCms.ExpectOid(framing.ReadEncoded(), CryptoEncoding.EnvelopedData);
@@ -271,14 +305,12 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 if (key == null) throw new InvalidMessageException("The message is not addressed to an available recipient");
                 if (key.Length * 8 != aesBits || iv.Length != 16) throw new InvalidMessageException("Invalid AES parameters");
                 OperationScope.Cancellation.ThrowIfCancellationRequested();
-                using var aes = Aes.Create(); aes.Key = key;
-                aes.IV = iv;
-                using var transform = aes.CreateDecryptor();
-                using var crypto = new CryptoStream(output, transform, CryptoStreamMode.Write, true);
-                framing.CopyOctets(crypto, 0x80);
-                framing.Leave(); framing.Leave(); framing.Leave(); framing.Leave(); framing.End();
-                crypto.FlushFinalBlock(); return result;
+                result.Aes = Aes.Create(); result.Aes.Key = key; result.Aes.IV = iv;
+                result.Transform = result.Aes.CreateDecryptor(); result.Framing = framing;
+                result.Content = new CryptoStream(framing.OpenOctets(0x80), result.Transform, CryptoStreamMode.Read, true);
+                return result;
             }
+            catch { result.Dispose(); throw; }
             finally { if (key != null) CryptographicOperations.ZeroMemory(key); }
         }
     }

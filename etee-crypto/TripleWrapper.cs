@@ -61,34 +61,35 @@ namespace Egelke.EHealth.Etee.Crypto
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
             if (signature == null && ownWebKey == null) throw new InvalidOperationException("A signing certificate or WebKey is required");
-            using var source = new SeekableCryptoInput(input);
-            using var inner = new CryptoSpool(CryptoSpool.Remaining(source.Stream));
-            await SignAndEmbedAsync(inner, source.Stream, signature, signature == authentication ? null : level & ~Level.T_Level).ConfigureAwait(false);
-            inner.Position = 0;
-            using var encrypted = new CryptoSpool(inner.Length);
-            NativeEnvelope.Encrypt(inner, encrypted, recipients, webKeys, key);
-            var result = new CryptoSpool(encrypted.Length);
+            var result = new CryptoSpool(CryptoSpool.Remaining(input));
             try
             {
+                using var outer = new NativeSigningWriter(result, authentication != null);
+                using var encrypted = NativeEnvelope.OpenEncryption(outer, recipients, webKeys, key);
+                using var inner = new NativeSigningWriter(encrypted.Content, signature != null);
+                await OperationScope.CopyAsync(input, inner).ConfigureAwait(false);
+                var innerDigest = await inner.CompleteContentAsync().ConfigureAwait(false);
+                var innerMetadata = SignDigest(innerDigest, signature);
+                await CompleteCoreAsync(innerMetadata, signature, signature == authentication ? null : level & ~Level.T_Level).ConfigureAwait(false);
+                inner.CompleteMetadata(innerMetadata);
+                await encrypted.CompleteAsync().ConfigureAwait(false);
+                var outerDigest = await outer.CompleteContentAsync().ConfigureAwait(false);
+                SignedCms outerMetadata;
                 for (int retry = 0; ; retry++)
                 {
                     OperationScope.Cancellation.ThrowIfCancellationRequested();
-                    encrypted.Position = 0; result.SetLength(0); result.Position = 0;
-                    try { await SignAndEmbedAsync(result, encrypted, authentication, level).ConfigureAwait(false); break; }
+                    try { outerMetadata = SignDigest(outerDigest, authentication); break; }
                     catch (CryptographicException) when (retry < Settings.Default.SignRetries)
                     { await Task.Delay((int)Math.Pow(10, retry + 1), OperationScope.Cancellation).ConfigureAwait(false); }
                 }
+                await CompleteCoreAsync(outerMetadata, authentication, level).ConfigureAwait(false);
+                outer.CompleteMetadata(outerMetadata);
                 result.Position = 0; return result;
             }
             catch { result.Dispose(); throw; }
         }
-        private async Task SignAndEmbedAsync(Stream output, Stream content, X509Certificate2 certificate, Level? requested)
-        {
-            long start = content.Position;
-            var metadata = NativeStreamingCms.Sign(content, certificate, certificate == null ? ownWebKey.NativeKey : Key(certificate), ownWebKey?.Id);
-            await CompleteCoreAsync(metadata, certificate, requested).ConfigureAwait(false);
-            content.Position = start; NativeCms.Attach(metadata, content).Write(output);
-        }
+        private SignedCms SignDigest(byte[] digest, X509Certificate2 certificate)
+            => NativeStreamingCms.SignDigest(digest, certificate, certificate == null ? ownWebKey.NativeKey : Key(certificate), ownWebKey?.Id);
         protected void SignDetached(Stream signed, Stream unsigned, X509Certificate2 selectedCert)
         {
             var cms = NativeStreamingCms.Sign(unsigned, selectedCert, Key(selectedCert), null);
@@ -104,11 +105,11 @@ namespace Egelke.EHealth.Etee.Crypto
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
             using var content = new CryptoSpool(CryptoSpool.Remaining(data));
-            var detached = NativeStreamingCms.Read(data, content);
+            var detached = await NativeStreamingCms.ReadAsync(data, content).ConfigureAwait(false);
             var key = await CompleteCoreAsync(detached.Metadata, null, level).ConfigureAwait(false);
             content.Position = 0;
             var output = new CryptoSpool(content.Length);
-            try { NativeCms.Attach(detached.Metadata, content).Write(output); output.Position = 0; return new TimemarkedResult<Stream>(output, key); }
+            try { await NativeCms.Attach(detached.Metadata, content).WriteAsync(output).ConfigureAwait(false); output.Position = 0; return new TimemarkedResult<Stream>(output, key); }
             catch { output.Dispose(); throw; }
         }
         // Operates on signature metadata only. The streaming backend supplies detached CMS,
