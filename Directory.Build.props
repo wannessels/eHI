@@ -1,0 +1,21 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>12.0</LangVersion>
+    <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net462' Or '$(TargetFramework)' == 'netstandard2.0' Or '$(TargetFramework)' == 'net472' Or '$(TargetFramework)' == 'net481'">
+    <DefineConstants>$(DefineConstants);LEGACY_RUNTIME</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(UseStandardPackages)' == 'true'">
+    <DefineConstants>$(DefineConstants);LEGACY_RUNTIME</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(TargetFramework)' != ''">
+    <Compile Include="$(MSBuildThisFileDirectory)compatibility/RuntimeAliases.cs" Link="Compatibility/RuntimeAliases.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="$(TargetFramework.StartsWith('net4'))">
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'pki-test' Or '$(MSBuildProjectName)' == 'library-core-tests' Or '$(MSBuildProjectName)' == 'etee-crypto-tests' Or '$(MSBuildProjectName)' == 'services-tests'">
+    <Compile Include="$(MSBuildThisFileDirectory)test-support/IntegrationAttributes.cs" Link="TestSupport/IntegrationAttributes.cs" />
+  </ItemGroup>
+</Project>

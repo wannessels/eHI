@@ -17,6 +17,9 @@
  */
 
 using Egelke.EHealth.Client.Security;
+#if NETSTANDARD2_0
+using X509SecurityToken = Egelke.EHealth.Client.Compatibility.CertificateProofToken;
+#endif
 using System;
 using System.Globalization;
 using System.Security.Cryptography;

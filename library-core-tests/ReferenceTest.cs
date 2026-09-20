@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IdentityModel.Selectors;
 using System.IdentityModel.Tokens;
@@ -69,7 +69,7 @@ namespace library_core_tests
         public MyX509Certificate2 ec = new MyX509Certificate2("files/ectest.p12", "");
         public MyX509Certificate2 rsa = new MyX509Certificate2("files/rsatest.p12", "");
 
-        [Fact]
+        [IntegrationFact]
         public void soap11Plain()
         {
             var binding = new BasicHttpsBinding();
@@ -82,7 +82,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void soap12Plain()
         {
             var binding = new WSHttpBinding(SecurityMode.Transport);
@@ -95,7 +95,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void soap12Wss10Rsa()
         {
             var binding = new WSHttpBinding(SecurityMode.TransportWithMessageCredential);
@@ -113,7 +113,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void soap12Custom()
         {
             var binding = new CustomBinding();
@@ -142,7 +142,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [SkippableFact]
+        [IntegrationFact]
         public void soap12Wss10Ecdsa()
         {
             //.Net framework does not use the proper methods to obtain the client's certificate key.
@@ -164,7 +164,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [Fact(Skip ="Implementations are very limited")]
+        [IntegrationFact(Skip ="Implementations are very limited")]
         public void federation()
         {
             //var stsEp = new EndpointAddress("https://services-int.ehealth.fgov.be/IAM/SingleSignOnService/v1");

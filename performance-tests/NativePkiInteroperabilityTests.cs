@@ -20,6 +20,7 @@ using Org.BouncyCastle.Security;
 using Org.BouncyCastle.Tsp;
 using Org.BouncyCastle.Utilities.Collections;
 using Xunit;
+using TrustStatus = Egelke.EHealth.Etee.Crypto.Status.TrustStatus;
 using BCert = Org.BouncyCastle.X509.X509Certificate;
 
 [Collection("Revocation")]
@@ -49,8 +50,8 @@ public class NativePkiInteroperabilityTests
             if (native[alias].HasPrivateKey)
             {
                 using var key = native[alias].GetRSAPrivateKey(); using var publicKey = native[alias].GetRSAPublicKey();
-                byte[] signature = key.SignData(new byte[32], HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
-                Assert.True(publicKey.VerifyData(new byte[32], signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss));
+                byte[] signature = key.SignData(new byte[32], HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+                Assert.True(publicKey.VerifyData(new byte[32], signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
             }
         }
         Assert.Throws<CryptographicException>(() => new EHealthP12(bytes, "incorrect"));
@@ -68,11 +69,15 @@ public class NativePkiInteroperabilityTests
     }
 
     [Theory]
-    [InlineData(Level.B_Level, true)] [InlineData(Level.B_Level, false)]
-    [InlineData(Level.T_Level, true)] [InlineData(Level.T_Level, false)]
-    [InlineData(Level.LT_Level, true)] [InlineData(Level.LT_Level, false)]
-    [InlineData(Level.LTA_Level, true)] [InlineData(Level.LTA_Level, false)]
-    public async Task CertificateAndTimestampProfilesRoundTripWithPrivateTrustAnchors(Level level, bool native)
+    [InlineData(Level.B_Level, true, false)] [InlineData(Level.B_Level, false, false)]
+    [InlineData(Level.T_Level, true, false)] [InlineData(Level.T_Level, false, false)]
+    [InlineData(Level.LT_Level, true, false)] [InlineData(Level.LT_Level, false, false)]
+    [InlineData(Level.LTA_Level, true, false)] [InlineData(Level.LTA_Level, false, false)]
+    [InlineData(Level.B_Level, true, true)] [InlineData(Level.B_Level, false, true)]
+    [InlineData(Level.T_Level, true, true)] [InlineData(Level.T_Level, false, true)]
+    [InlineData(Level.LT_Level, true, true)] [InlineData(Level.LT_Level, false, true)]
+    [InlineData(Level.LTA_Level, true, true)] [InlineData(Level.LTA_Level, false, true)]
+    public async Task CertificateAndTimestampProfilesRoundTripWithPrivateTrustAnchors(Level level, bool native, bool pkcs1)
     {
         using var server = new PkiFixture.FixtureServer();
         var rootKey = PkiFixture.NewKey(); var root = PkiFixture.MakeCert("CN=Test Root", BigInteger.One, rootKey, null, null);
@@ -80,18 +85,22 @@ public class NativePkiInteroperabilityTests
         var tsaKey = PkiFixture.NewKey(); var tsa = PkiFixture.MakeCert("CN=Test TSA", BigInteger.Three, tsaKey, root, rootKey, crl: server.Url + "crl", timestamp: true);
         using var rootCert = new X509Certificate2(root.GetEncoded());
         using var signingRsa = RSA.Create(); signingRsa.ImportParameters(DotNetUtilities.ToRSAParameters((RsaPrivateCrtKeyParameters)authKey.Private));
+#if LEGACY_RUNTIME
+        using var signingCert = PkiFixture.WithKey(auth, authKey);
+#else
         using var publicCert = new X509Certificate2(auth.GetEncoded()); using var signingCert = publicCert.CopyWithPrivateKey(signingRsa);
+#endif
         server.Crl = PkiFixture.MakeCrl(root, rootKey).GetEncoded();
         var previous = X509CertificateHelper.CustomTrustStore;
         X509CertificateHelper.CustomTrustStore = new X509Certificate2Collection(rootCert);
         RevocationCache.Clear();
-        var factory = new DataSealerFactory(NullLoggerFactory.Instance, native);
+        var factory = new DataSealerFactory(NullLoggerFactory.Instance, native, pkcs1 ? RSASignaturePadding.Pkcs1 : RSASignaturePadding.Pss);
         var sealer = level == Level.B_Level ? factory.Create(level, signingCert) : factory.Create(level, new LocalTimestampProvider(tsa, tsaKey, root), signingCert);
         var receiver = new DataUnsealerFactory(NullLoggerFactory.Instance, native).Create(level, new X509Certificate2Collection(), new X509Certificate2Collection());
-        var recipient = new SecretKey(new byte[] { 3 }, RandomNumberGenerator.GetBytes(16));
+        var recipient = new SecretKey(new byte[] { 3 }, RuntimeCompat.RandomBytes(16));
         try
         {
-            byte[] data = RandomNumberGenerator.GetBytes(5000);
+            byte[] data = RuntimeCompat.RandomBytes(5000);
             using var input = new MemoryStream(data); using var output = await sealer.SealAsync(input, recipient, Array.Empty<EncryptionToken>());
             Stream completed = null;
             if (level != Level.B_Level)

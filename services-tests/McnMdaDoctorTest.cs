@@ -56,7 +56,7 @@ namespace services_tests
             target.Endpoint.EndpointBehaviors.Add(new LoggingEndpointBehavior(loggerFactory.CreateLogger<LoggingMessageInspector>()));
         }
 
-        [Fact]
+        [IntegrationFact]
         public void ClearRequestAndResponse()
         {
             //Create the query
@@ -74,7 +74,7 @@ namespace services_tests
             Assert.NotEmpty(assertions);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void EncryptedRequest()
         {
             //Create the query
@@ -92,7 +92,7 @@ namespace services_tests
             Assert.NotEmpty(assertions);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void ClearRequestEncryptedResponse()
         {
             //Create the query

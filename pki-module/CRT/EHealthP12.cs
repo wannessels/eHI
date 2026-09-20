@@ -82,6 +82,29 @@ namespace Egelke.EHealth.Client.Pki
         public EHealthP12(byte[] data, String pwd)
         {
             password = pwd;
+#if LEGACY_RUNTIME
+            // The bounded platform loader validates MAC/password/import limits first.
+            // Older targets lack Pkcs12Info, so BC supplies aliases after that check.
+            var framing = new AsnReader(data, AsnEncodingRules.BER);
+            framing.ReadEncodedValue(); framing.ThrowIfNotEmpty();
+            var imported = X509CertificateLoader.LoadPkcs12Collection(data, pwd, X509KeyStorageFlags.Exportable);
+            try
+            {
+                var legacy = new Org.BouncyCastle.Pkcs.Pkcs12StoreBuilder().Build();
+                using (var stream = new MemoryStream(data, false)) legacy.Load(stream, pwd?.ToCharArray());
+                foreach (string alias in legacy.Aliases)
+                {
+                    byte[] encoded = legacy.GetCertificate(alias).Certificate.GetEncoded();
+                    bool privateKey = legacy.IsKeyEntry(alias);
+                    if (!privateKey) { SetCertificate(alias, new X509Certificate2(encoded)); continue; }
+                    var matches = imported.Cast<X509Certificate2>().Where(c => c.HasPrivateKey == privateKey && c.RawData.SequenceEqual(encoded)).ToArray();
+                    if (matches.Length == 0) throw new CryptographicException("Missing PKCS#12 certificate/key association");
+                    SetCertificate(alias, new X509Certificate2(matches[0]));
+                }
+            }
+            catch { foreach (var cert in store.Values.Distinct()) cert.Dispose(); throw; }
+            finally { foreach (var cert in imported) cert.Dispose(); }
+#else
             var info = Pkcs12Info.Decode(data, out int read);
             if (read != data.Length) throw new CryptographicException("Trailing PKCS#12 data");
             if (info.IntegrityMode != Pkcs12IntegrityMode.Password && info.IntegrityMode != Pkcs12IntegrityMode.None) throw new CryptographicException("Unsupported PKCS#12 integrity mode");
@@ -100,7 +123,9 @@ namespace Egelke.EHealth.Client.Pki
             }
             catch { foreach (var cert in store.Values.Distinct()) cert.Dispose(); throw; }
             finally { if (imported != null) foreach (var cert in imported) cert.Dispose(); }
+#endif
         }
+#if !LEGACY_RUNTIME
         private static void CollectBags(Pkcs12SafeContents contents, List<Pkcs12SafeBag> bags)
         {
             foreach (var bag in contents.GetBags())
@@ -112,7 +137,7 @@ namespace Egelke.EHealth.Client.Pki
             if (matches.Length == 0) return null;
             if (matches.Length != 1 || matches[0].Values.Count != 1) throw new CryptographicException("Ambiguous PKCS#12 attribute");
             var reader = new AsnReader(matches[0].Values[0].RawData, AsnEncodingRules.DER);
-            string result = oid == "1.2.840.113549.1.9.20" ? reader.ReadCharacterString(UniversalTagNumber.BMPString) : Convert.ToHexString(reader.ReadOctetString());
+            string result = oid == "1.2.840.113549.1.9.20" ? reader.ReadCharacterString(UniversalTagNumber.BMPString) : RuntimeCompat.ToHexString(reader.ReadOctetString());
             reader.ThrowIfNotEmpty(); return result;
         }
         private void LoadBags(List<Pkcs12SafeBag> bags, X509Certificate2Collection imported)
@@ -127,7 +152,7 @@ namespace Egelke.EHealth.Client.Pki
                 using var cert = certificateBag?.GetCertificate();
                 var candidates = imported.Cast<X509Certificate2>().Where(c => c.HasPrivateKey && (cert == null || c.RawData.AsSpan().SequenceEqual(cert.RawData))).ToArray();
                 if (candidates.Length != 1) throw new CryptographicException("Ambiguous or missing PKCS#12 key association");
-                alias ??= id?.ToLowerInvariant() ?? Convert.ToHexString(CryptoEncoding.SubjectKeyIdentifier(candidates[0])).ToLowerInvariant();
+                alias ??= id?.ToLowerInvariant() ?? RuntimeCompat.ToHexString(CryptoEncoding.SubjectKeyIdentifier(candidates[0])).ToLowerInvariant();
                 SetCertificate(alias, new X509Certificate2(candidates[0]));
             }
             foreach (var bag in certificates)
@@ -137,6 +162,7 @@ namespace Egelke.EHealth.Client.Pki
                 SetCertificate(alias, bag.GetCertificate());
             }
         }
+#endif
         private void SetCertificate(string alias, X509Certificate2 value)
         {
             if (store.TryGetValue(alias, out var previous)) previous.Dispose();

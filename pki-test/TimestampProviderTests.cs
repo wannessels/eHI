@@ -1,7 +1,11 @@
 using CertificateList = Egelke.EHealth.Client.Pki.CertificateRevocationList;
 using BasicOcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
 using OcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+#if LEGACY_RUNTIME
+using TimeStampToken = Egelke.EHealth.Client.Pki.Compatibility.PortableTimestampToken;
+#else
 using TimeStampToken = System.Security.Cryptography.Pkcs.Rfc3161TimestampToken;
+#endif
 using Egelke.EHealth.Client.Pki;
 using System;
 using System.Collections.Generic;
@@ -43,7 +47,7 @@ namespace Egelke.EHealth.Client.Pki.Test
         }
 
 
-        [Fact]
+        [IntegrationFact]
         public void NewTsViaFedict()
         {
             var provider = new Rfc3161TimestampProvider();

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -59,7 +59,7 @@ namespace etee_crypto_tests
             //tsp = new EHealthTimestampProvider(tsa);
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(Credentials))]
         public void BLevel(EHealthP12 senderId, EncryptionToken receiverId, ITimestampProvider tsp)
         {
@@ -83,7 +83,7 @@ namespace etee_crypto_tests
             Assert.Equal(clearMessage, new StreamReader(result.UnsealedData).ReadToEnd());
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(Credentials))]
         public void TLevel(EHealthP12 senderId, EncryptionToken receiverId, ITimestampProvider tsp)
         {
@@ -107,7 +107,7 @@ namespace etee_crypto_tests
             Assert.Equal(clearMessage, new StreamReader(result.UnsealedData).ReadToEnd());
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(Credentials))]
         public void LTLevel(EHealthP12 senderId, EncryptionToken receiverId, ITimestampProvider tsp)
         {

@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics.Metrics;
 using System.IO;
 using System.Security.Cryptography;
 using System.ServiceModel;
@@ -7,6 +8,7 @@ using System.Threading.Tasks;
 using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Client.Services;
 using Egelke.EHealth.Etee.Crypto;
+using Egelke.EHealth.Etee.Crypto.Configuration;
 using Egelke.EHealth.Etee.Crypto.Sender;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -14,6 +16,33 @@ using Xunit;
 [Collection("Revocation")]
 public class DefaultPolicyTests
 {
+    [Theory]
+    [InlineData(8, false)] [InlineData(17, true)]
+    public async Task DefaultThresholdKeepsSmallStreamsInMemoryAndSpillsLargerStreams(int mebibytes, bool spills)
+    {
+        Assert.Equal(16L * 1024 * 1024, Settings.Default.InMemorySize);
+        long spillCount = 0;
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, subscriber) =>
+        { if (instrument.Meter.Name == EHealthMetrics.MeterName && instrument.Name == "ehealth.spool.spills") subscriber.EnableMeasurementEvents(instrument); };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, state) => Interlocked.Add(ref spillCount, value));
+        listener.Start();
+        using var rsa = RSA.Create(2048);
+        var sealer = new DataSealerFactory(NullLoggerFactory.Instance, true).Create(Level.B_Level, new WebKey(rsa));
+        try
+        {
+            using var input = new NonSeekableInput(new byte[mebibytes * 1024 * 1024]);
+            using var output = await sealer.SealAsync(input, new SecretKey(new byte[] { 1 }, new byte[16]), Array.Empty<EncryptionToken>());
+            Assert.Equal(spills, spillCount > 0);
+        }
+        finally { (sealer as IDisposable)?.Dispose(); }
+    }
+    private sealed class NonSeekableInput : MemoryStream
+    {
+        internal NonSeekableInput(byte[] data) : base(data, false) { }
+        public override bool CanSeek => false;
+    }
+
     [ServiceContract]
     public interface ITestPort
     {

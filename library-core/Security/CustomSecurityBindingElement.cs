@@ -122,11 +122,11 @@ namespace Egelke.EHealth.Client.Security
         /// <returns>new instance of custom channel factory</returns>
         public override IChannelFactory<TChannel> BuildChannelFactory<TChannel>(BindingContext context)
         {
-            ClientCredentials clientCredentials = context.BindingParameters.Find<ClientCredentials>();
+            ClientCredentials clientCredentials = System.Linq.Enumerable.FirstOrDefault(System.Linq.Enumerable.OfType<ClientCredentials>(context.BindingParameters));
             if (!(clientCredentials is CustomClientCredentials))
             {
+                if (clientCredentials != null) context.BindingParameters.Remove(clientCredentials);
                 clientCredentials = new CustomClientCredentials(clientCredentials, _logger);
-                context.BindingParameters.Remove(typeof(ClientCredentials));
                 context.BindingParameters.Add(clientCredentials);
             }
             return new CustomSecurityChannelFactory<TChannel>(_logger, context.BuildInnerChannelFactory<TChannel>())

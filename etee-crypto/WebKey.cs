@@ -18,6 +18,7 @@
 
 using System;
 using System.Security.Cryptography;
+using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Etee.Crypto.Utils;
 
 namespace Egelke.EHealth.Etee.Crypto
@@ -95,10 +96,10 @@ namespace Egelke.EHealth.Etee.Crypto
 
         private static byte[] CalculateId(AsymmetricAlgorithm key)
         {
-            var spki = Egelke.EHealth.Client.Pki.CryptoEncoding.Sequence(key.ExportSubjectPublicKeyInfo());
+            var spki = Egelke.EHealth.Client.Pki.CryptoEncoding.Sequence(RuntimeCompat.ExportPublicKey(key));
             spki.ReadEncodedValue(); var bits = spki.ReadBitString(out int unused); spki.ThrowIfNotEmpty();
             if (unused != 0) throw new CryptographicException("Invalid public key encoding");
-            return SHA1.HashData(bits);
+            return CryptoEncoding.Hash(CryptoEncoding.Sha1, bits);
         }
         internal AsymmetricAlgorithm NativeKey => key;
 

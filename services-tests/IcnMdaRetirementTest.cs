@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IdentityModel.Claims;
 using System.IO;
@@ -55,7 +55,7 @@ namespace services_tests
             target.Endpoint.EndpointBehaviors.Add(new LoggingEndpointBehavior(loggerFactory.CreateLogger<LoggingMessageInspector>()));
         }
 
-        [Fact(Skip ="Not ready yet")]
+        [IntegrationFact(Skip ="Not ready yet")]
         public void ClearRequestAndResponse()
         {
             //Create the query

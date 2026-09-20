@@ -4,6 +4,7 @@ using System.IdentityModel.Claims;
 using System.IO;
 using System.Linq;
 using System.Security;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.ServiceModel;
 using System.ServiceModel.Channels;
@@ -53,8 +54,8 @@ namespace Egelke.EHealth.Client.Services
             }
         }
 
-        private readonly ResourceCache<Tuple<Level, X509Certificate2, bool>, IDataSealer> sealers =
-            new ResourceCache<Tuple<Level, X509Certificate2, bool>, IDataSealer>((a, b) => a.Item1 == b.Item1 && ReferenceEquals(a.Item2, b.Item2) && a.Item3 == b.Item3);
+        private readonly ResourceCache<Tuple<Level, X509Certificate2, bool, RSASignaturePadding>, IDataSealer> sealers =
+            new ResourceCache<Tuple<Level, X509Certificate2, bool, RSASignaturePadding>, IDataSealer>((a, b) => a.Item1 == b.Item1 && ReferenceEquals(a.Item2, b.Item2) && a.Item3 == b.Item3 && a.Item4 == b.Item4);
         private readonly ResourceCache<Tuple<EHealthP12[], bool>, IDataUnsealer> unsealers =
             new ResourceCache<Tuple<EHealthP12[], bool>, IDataUnsealer>((a, b) => a.Item2 == b.Item2 && a.Item1.Length == b.Item1.Length && a.Item1.Zip(b.Item1, ReferenceEquals).All(equal => equal));
 
@@ -89,8 +90,11 @@ namespace Egelke.EHealth.Client.Services
         {
             _logger = logger;
             Store = store;
-            ((ICommunicationObject)this).Closed += DisposeCryptoContexts;
-            ((ICommunicationObject)this).Faulted += DisposeCryptoContexts;
+            // ClientBase's communication events access InnerChannel, which freezes
+            // credentials before the caller can configure them. Observe the factory
+            // here and attach channel events only when a channel is actually created.
+            ChannelFactory.Closed += DisposeCryptoContexts;
+            ChannelFactory.Faulted += DisposeCryptoContexts;
 
             if (store != null)
             {
@@ -104,6 +108,15 @@ namespace Egelke.EHealth.Client.Services
         {
             sealers.Dispose();
             unsealers.Dispose();
+        }
+
+        protected override Port CreateChannel()
+        {
+            var channel = base.CreateChannel();
+            var communication = (ICommunicationObject)channel;
+            communication.Closed += DisposeCryptoContexts;
+            communication.Faulted += DisposeCryptoContexts;
+            return channel;
         }
 
         private static Binding Enrich(Binding binding, EHealthP12 store)
@@ -236,8 +249,8 @@ namespace Egelke.EHealth.Client.Services
                         _logger.LogDebug("encrypted content: {0}", reader.ReadToEnd());
                     clearStream.Position = position;
                 }
-                using (var lease = sealers.Acquire(Tuple.Create(level, ClientCredentials.ClientCertificate.Certificate, Settings.Default.UseNativeCrypto),
-                    identity => new DataSealerFactory(NullLoggerFactory.Instance, identity.Item3).Create(identity.Item1, identity.Item2)))
+                using (var lease = sealers.Acquire(Tuple.Create(level, ClientCredentials.ClientCertificate.Certificate, Settings.Default.UseNativeCrypto, Settings.Default.RsaSignaturePadding),
+                    identity => new DataSealerFactory(NullLoggerFactory.Instance, identity.Item3, identity.Item4).Create(identity.Item1, identity.Item2)))
                 using (Stream cypherStream = await lease.Value.SealAsync(clearStream, recepients).ConfigureAwait(false))
                 {
                     return ToByteArray(cypherStream);

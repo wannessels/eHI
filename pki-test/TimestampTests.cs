@@ -1,7 +1,11 @@
 using CertificateList = Egelke.EHealth.Client.Pki.CertificateRevocationList;
 using BasicOcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
 using OcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+#if LEGACY_RUNTIME
+using TimeStampToken = Egelke.EHealth.Client.Pki.Compatibility.PortableTimestampToken;
+#else
 using TimeStampToken = System.Security.Cryptography.Pkcs.Rfc3161TimestampToken;
+#endif
 
 using System;
 using System.Collections.Generic;
@@ -34,7 +38,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             }
         }
 
-        [Fact]
+        [IntegrationFact]
         public void Fedict_TsInternalTime_GetNewCrl()
         {
             //if (DateTime.UtcNow > new DateTime(2019, 1, 23, 12, 0, 0, DateTimeKind.Utc)) Assert.Inconclusive("The timestamp should have been renewed");
@@ -66,7 +70,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             }
         }
 
-        [Fact]
+        [IntegrationFact]
         public async Task Fedict_TsInternalTime_GetNewCrlAsync()
         {
             //if (DateTime.UtcNow > new DateTime(2019, 1, 23, 12, 0, 0, DateTimeKind.Utc)) Assert.Inconclusive("The timestamp should have been renewed");
@@ -98,7 +102,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             }
         }
 
-        [Fact]
+        [IntegrationFact]
         public void FedictTs_InternalTime_ProvideCrl()
         {
             CertificateList crl1 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs1.crl"));
@@ -132,7 +136,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             }
         }
 
-        [Fact]
+        [IntegrationFact]
         public void FedictTs_ProvidedTime_ProvideCrl()
         {
             CertificateList crl1 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs1.crl"));
@@ -164,7 +168,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             }
         }
 
-        [Fact]
+        [IntegrationFact]
         public void FedictTs_ProvidedTime_ProvideOutdatedCrl()
         {
             CertificateList crl1 = CertificateList.Parse(File.ReadAllBytes("files/fedictTs1.crl"));
@@ -197,7 +201,7 @@ namespace Egelke.EHealth.Client.Pki.Test
 
         }
 
-        [Fact]
+        [IntegrationFact]
         public void EHealthTsWithCert()
         {
             //if (DateTime.UtcNow > new DateTime(2016, 3, 17, 11, 25, 11, DateTimeKind.Utc)) Assert.Inconclusive("The timestamp should have been renewed");
@@ -215,7 +219,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Equal(0, ts.CertificateChain.ChainStatus.Count(x => x.Status != X509ChainStatusFlags.RevocationStatusUnknown));
         }
 
-        [Fact]
+        [IntegrationFact]
         public void EHealthTsWithoutCert()
         {
             TimeStampToken tst = File.ReadAllBytes("files/ehTs2.ts").ToTimeStampToken();

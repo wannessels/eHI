@@ -72,7 +72,7 @@ namespace Egelke.EHealth.Etee.Crypto.Store
         /// case a time-stamp authority is used and not a time-mark authority.
         /// </para>
         /// </remarks>
-        /// <param name="level">The level to which a message must conform to, <c>null</c> meaning no revocation check must be done</param>
+        /// <param name="level">The level to which a message must conform; <c>null</c> still checks signer revocation but does not require a timestamp</param>
         /// <returns>The completer of the required level that will verify the message, using the embedded timestamps if needed</returns>
         public IDataVerifier Create(Level? level)
         {

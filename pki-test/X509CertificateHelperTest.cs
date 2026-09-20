@@ -1,7 +1,11 @@
 using CertificateList = Egelke.EHealth.Client.Pki.CertificateRevocationList;
 using BasicOcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
 using OcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+#if LEGACY_RUNTIME
+using TimeStampToken = Egelke.EHealth.Client.Pki.Compatibility.PortableTimestampToken;
+#else
 using TimeStampToken = System.Security.Cryptography.Pkcs.Rfc3161TimestampToken;
+#endif
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -111,7 +115,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Equal(new DateTime(2014, 3, 5, 18, 12, 19, DateTimeKind.Utc), result.ProducedAt);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void VerifyOCSPOfNewEid_LiveRetrieval()
         {
             var target = newEid;
@@ -186,7 +190,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Null(result);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void GetOCSPOfNewEid_Downloaded()
         {
             var target = newEid;
@@ -199,7 +203,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Equal(resultDetail.ProducedAt.Floor(), DateTime.UtcNow.Floor());
         }
 
-        [Fact]
+        [IntegrationFact]
         public async Task GetOCSPOfNewEid_DownloadedAsync()
         {
             var target = newEid;
@@ -212,7 +216,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Equal(resultDetail.ProducedAt.Floor(), DateTime.UtcNow.Floor());
         }
 
-        [Fact]
+        [IntegrationFact]
         public void GetOCSPOfOldEid_Failed()
         {
             var target = oldEid;
@@ -221,7 +225,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Throws<RevocationUnknownException>(() => target.GetOcspResponse(target));
         }
 
-        [Fact]
+        [IntegrationFact]
         public void GetOCSPOfGoogle_Downloaded()
         {
             var target = new X509Certificate2(@"files/google.crt");
@@ -231,7 +235,7 @@ namespace Egelke.EHealth.Client.Pki.Test
         }
 
         /*
-        [Fact]
+        [IntegrationFact]
         public void GetOCSPOfEgelke_Downloaded()
         {
             var target = new X509Certificate2(@"files/egelke.crt");
@@ -255,7 +259,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Null(result);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void GetCertificateListOfNewEid_Downloaded()
         {
             var target = newEid;
@@ -267,7 +271,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.True(result.NextUpdate.Value >= DateTime.UtcNow);
         }
 
-        [Fact]
+        [IntegrationFact]
         public async Task GetCertificateListOfNewEid_DownloadedAsync()
         {
             var target = newEid;
@@ -279,7 +283,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.True(result.NextUpdate.Value >= DateTime.UtcNow);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void GetCertificateListWithMulti_DownloadedFirst()
         {
             var target = new X509Certificate2(@"files/linuxize.crt");

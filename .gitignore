@@ -23,3 +23,6 @@ NIHII*.*p12
 
 # Local profiling build logs and scratch results; reviewed results live in benchmarks/results.
 /artifacts/profiling/
+/artifacts/test-results/
+/artifacts/standard-packages/
+/artifacts/review/

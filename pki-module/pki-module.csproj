@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net462;netstandard2.0;net6.0;net8.0</TargetFrameworks>
     <RootNamespace>Egelke.EHealth.Client.Pki</RootNamespace>
     <AssemblyName>Egelke.EHealth.Client.Pki</AssemblyName>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
@@ -34,5 +34,13 @@
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.12" />
     <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.12" />
+    <PackageReference Include="System.Formats.Asn1" Version="10.0.12" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="10.0.12" />
+    <PackageReference Include="System.Threading.Tasks.Extensions" Version="4.6.3" Condition="'$(TargetFramework)' == 'net462' Or '$(TargetFramework)' == 'netstandard2.0'" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.1" Condition="'$(TargetFramework)' == 'net462' Or '$(TargetFramework)' == 'netstandard2.0'" />
+    <PackageReference Include="System.Security.Cryptography.OpenSsl" Version="5.0.0" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+    <Reference Include="System.Net.Http" />
   </ItemGroup>
 </Project>

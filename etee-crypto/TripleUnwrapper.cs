@@ -45,7 +45,7 @@ namespace Egelke.EHealth.Etee.Crypto
         public Task<UnsealResult> UnsealAsync(Stream data, WebKey sender, SecretKey key) => OperationPolicy.Default.RunAsync("unseal", _ => UnsealCoreAsync(data, sender, key));
         protected virtual async Task<UnsealResult> UnsealCoreAsync(Stream data, WebKey sender, SecretKey key)
         {
-            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            RuntimeCompat.ThrowIfDisposed(disposed != 0, this);
             var clear = new CryptoSpool(CryptoSpool.Remaining(data));
             NativeEnvelope.Decryption encrypted = null;
             try
@@ -80,7 +80,7 @@ namespace Egelke.EHealth.Etee.Crypto
             => OperationPolicy.Default.RunAsync("verify", _ => VerifyMessageAsync(data, sender, provider));
         protected virtual async Task<SignatureSecurityInformation> VerifyMessageAsync(Stream data, WebKey sender, ITimemarkProvider provider)
         {
-            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            RuntimeCompat.ThrowIfDisposed(disposed != 0, this);
             var parsed = await NativeStreamingCms.ReadAsync(data, Stream.Null).ConfigureAwait(false);
             return await VerifyCoreAsync(parsed.Metadata, sender, null, provider, parsed.Verify, parsed.Certificates).ConfigureAwait(false);
         }
@@ -156,7 +156,9 @@ namespace Egelke.EHealth.Etee.Crypto
             result.IsNonRepudiatable = certificate != null && CryptoEncoding.HasKeyUsage(certificate, 1);
             result.SigningTime = NativeCms.SigningTime(signer);
             DateTime signingTime = result.SigningTime ?? DateTime.UtcNow;
-            var evidence = level == null ? (null, null) : NativeCms.RevocationValues(signer);
+            // A null level omits the timestamp requirement, not signer revocation.
+            // Preserve master's checks, including evidence already embedded in CMS.
+            var evidence = NativeCms.RevocationValues(signer);
             if ((level & Level.T_Level) == Level.T_Level && outer == null)
             {
                 DateTime validatedTime;

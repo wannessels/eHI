@@ -25,7 +25,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
         protected override async Task<UnsealResult> UnsealCoreAsync(Stream data, WebKey sender, SecretKey secret)
         {
-            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            RuntimeCompat.ThrowIfDisposed(disposed != 0, this);
             using var source = new BouncyCms.Input(data);
             var streams = BouncyCms.Streams(source.Stream);
             using var encrypted = streams.CreateNew();
@@ -46,7 +46,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
         protected override async Task<SignatureSecurityInformation> VerifyMessageAsync(Stream data, WebKey sender, ITimemarkProvider provider)
         {
-            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            RuntimeCompat.ThrowIfDisposed(disposed != 0, this);
             using var source = new BouncyCms.Input(data);
             return await VerifyAndCopyAsync(source.Stream, Stream.Null, sender, null, provider).ConfigureAwait(false);
         }
@@ -109,25 +109,30 @@ namespace Egelke.EHealth.Etee.Crypto
                     continue; // An explicitly supplied KEK must never fall back to certificate decryption.
                 }
                 if (!(recipient is KeyTransRecipientInformation)) continue;
-                if (recipient.KeyEncryptionAlgOid != CryptoEncoding.Rsa) throw new InvalidMessageException("Unsupported key transport algorithm");
+                if (recipient.KeyEncryptionAlgOid != CryptoEncoding.Rsa) continue;
                 var certificate = (encryptionCertificates ?? new X509Certificate2Collection()).Cast<X509Certificate2>()
-                    .Where(c => c.HasPrivateKey && recipient.RecipientID.Match(DotNetUtilities.FromX509Certificate(c)))
+                    .Where(c => c.HasPrivateKey && recipient.RecipientID.Match(DotNetUtilities.FromX509Certificate(c)) && PublicKeyCache.Get(c) is RSA)
                     .OrderByDescending(c => CryptoEncoding.ValidAt(c, date)).ThenByDescending(c => c.NotBefore).FirstOrDefault();
                 if (certificate != null)
                 {
-                    selected = recipient; selectedCertificate = certificate; privateKey = bouncyKeys.Get(certificate);
-                    result.SubjectId = CryptoEncoding.SubjectKeyIdentifier(certificate); break;
+                    if (certificate.IsBetter(selectedCertificate, date))
+                    {
+                        selected = recipient; selectedCertificate = certificate; privateKey = null;
+                        result.SubjectId = CryptoEncoding.SubjectKeyIdentifier(certificate);
+                    }
+                    continue;
                 }
                 // BC 2.6 stores the DER OCTET STRING here, rather than its raw key identifier.
                 byte[] encodedId = recipient.RecipientID.SubjectKeyIdentifier;
                 byte[] id = encodedId == null ? null : Org.BouncyCastle.Asn1.Asn1OctetString.GetInstance(encodedId).GetOctets();
                 var web = ownKeys.FirstOrDefault(w => id != null && w.Id.AsSpan().SequenceEqual(id));
-                if (web != null)
+                if (web != null && selected == null)
                 {
-                    selected = recipient; privateKey = bouncyKeys.Get(web); keyBits = web.NativeKey.KeySize; result.SubjectId = web.Id; break;
+                    selected = recipient; privateKey = bouncyKeys.Get(web); keyBits = web.NativeKey.KeySize; result.SubjectId = web.Id;
                 }
             }
             if (selected == null) throw new InvalidMessageException("The message is not addressed to an available recipient");
+            if (selectedCertificate != null) privateKey = bouncyKeys.Get(selectedCertificate);
             if (selectedCertificate != null)
                 result.Subject = await selectedCertificate.VerifyAsync(date, new[] { 2, 3 }, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey, authenticationCertificates, null, null).ConfigureAwait(false);
             else if (keyBits < (secret == null ? EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey : EteeActiveConfig.Unseal.MinimumEncryptionKeySize.SymmetricRecipientKey))

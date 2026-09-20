@@ -37,17 +37,29 @@ namespace Egelke.EHealth.Client.Pki
             Sha512 => HashAlgorithmName.SHA512,
             _ => throw new CryptographicException("Unsupported digest algorithm: " + oid)
         };
-        public static byte[] Hash(string oid, ReadOnlySpan<byte> bytes) { using var hash = IncrementalHash.CreateHash(HashName(oid)); hash.AppendData(bytes); return hash.GetHashAndReset(); }
+        public static byte[] Hash(string oid, ReadOnlySpan<byte> bytes)
+        {
+#if NET6_0_OR_GREATER
+            return oid switch
+            {
+                Sha1 => SHA1.HashData(bytes), Sha256 => SHA256.HashData(bytes),
+                Sha384 => SHA384.HashData(bytes), Sha512 => SHA512.HashData(bytes),
+                _ => throw new CryptographicException("Unsupported digest algorithm: " + oid)
+            };
+#else
+            using var hash = IncrementalHash.CreateHash(HashName(oid)); hash.AppendData(bytes); return hash.GetHashAndReset();
+#endif
+        }
         public static byte[] SubjectKeyIdentifier(X509Certificate2 cert)
         {
             var ski = cert.Extensions.OfType<X509SubjectKeyIdentifierExtension>().SingleOrDefault();
-            return ski == null ? SHA1.HashData(cert.PublicKey.EncodedKeyValue.RawData) : Convert.FromHexString(ski.SubjectKeyIdentifier);
+            return ski == null ? CryptoEncoding.Hash(CryptoEncoding.Sha1, cert.PublicKey.EncodedKeyValue.RawData) : RuntimeCompat.FromHexString(ski.SubjectKeyIdentifier);
         }
         public static byte[] Serial(X509Certificate2 cert) => cert.GetSerialNumber().Reverse().SkipWhile(b => b == 0).DefaultIfEmpty((byte)0).ToArray();
         public static string SerialKey(ReadOnlySpan<byte> serial)
         {
             int offset = 0; while (offset < serial.Length - 1 && serial[offset] == 0) offset++;
-            return Convert.ToHexString(serial.Slice(offset));
+            return RuntimeCompat.ToHexString(serial.Slice(offset));
         }
         public static string ReadSerial(AsnReader reader)
         {
@@ -160,10 +172,10 @@ namespace Egelke.EHealth.Client.Pki
                 _ => throw new CryptographicException("Unsupported signature algorithm: " + oid)
             };
             if (oid.StartsWith("1.2.840.113549.1.1.", StringComparison.Ordinal))
-            { using var key = signer.GetRSAPublicKey(); return key != null && key.VerifyData(data, signature, HashName(digest), oid == RsaPss ? RSASignaturePadding.Pss : RSASignaturePadding.Pkcs1); }
+            { using var key = signer.GetRSAPublicKey(); return key != null && key.VerifyHash(Hash(digest, data), signature.ToArray(), HashName(digest), oid == RsaPss ? RSASignaturePadding.Pss : RSASignaturePadding.Pkcs1); }
             if (oid.StartsWith("1.2.840.10045.", StringComparison.Ordinal))
-            { using var key = signer.GetECDsaPublicKey(); return key != null && key.VerifyData(data, signature, HashName(digest), DSASignatureFormat.Rfc3279DerSequence); }
-            using (var key = signer.GetDSAPublicKey()) return key != null && key.VerifyData(data, signature, HashName(digest), DSASignatureFormat.Rfc3279DerSequence);
+            { using var key = signer.GetECDsaPublicKey(); return key != null && RuntimeCompat.VerifyEcHash(key, Hash(digest, data), signature.ToArray()); }
+            using (var key = RuntimeCompat.GetDsaPublicKey(signer)) return key != null && RuntimeCompat.VerifyDsaHash(key, Hash(digest, data), signature.ToArray());
         }
         /// <summary>Validates the platform-supported RSA-PSS parameter profile and returns its digest OID.</summary>
         public static string ReadPssDigest(byte[] parameters)

@@ -82,11 +82,11 @@ namespace Egelke.EHealth.Client.Pki
         /// <remarks>
         /// Enable on servers where all intermediates are provided via the extra store.
         /// </remarks>
-        public static bool DisableCertificateDownloads { get => disableCertificateDownloads; set { disableCertificateDownloads = value; ChainCache.Clear(); } }
+        public static bool DisableCertificateDownloads { get => Volatile.Read(ref disableCertificateDownloads); set { Volatile.Write(ref disableCertificateDownloads, value); ChainCache.Clear(); } }
         private static bool disableCertificateDownloads;
 
         /// <summary>Optional explicit trust anchors. Null uses the operating-system trust store. Configure before serving requests.</summary>
-        public static X509Certificate2Collection CustomTrustStore { get => customTrustStore; set { customTrustStore = value; ChainCache.Clear(); } }
+        public static X509Certificate2Collection CustomTrustStore { get => Volatile.Read(ref customTrustStore); set { Volatile.Write(ref customTrustStore, value); ChainCache.Clear(); } }
         private static X509Certificate2Collection customTrustStore;
 
         /// <summary>
@@ -105,23 +105,34 @@ namespace Egelke.EHealth.Client.Pki
                 throw new ArgumentException("validation can't occur in the future", "validationTime");
             }
 
-            string key = ChainCache.Key(cert, extraStore);
-            Chain cached = ChainCache.TryGet(key, validationTime);
+            var generation = ChainCache.Capture();
+            var configuredTrust = CustomTrustStore;
+            // The key and the platform build must see the same collection contents.
+            // Callers must still serialize in-place collection edits with validation.
+            var trust = configuredTrust == null ? null : new X509Certificate2Collection(configuredTrust);
+            var extra = extraStore == null ? null : new X509Certificate2Collection(extraStore);
+            bool disableDownloads = DisableCertificateDownloads;
+            string key = ChainCache.Key(cert, extra, trust, disableDownloads);
+            Chain cached = ChainCache.TryGet(generation, key, validationTime);
             if (cached != null) { EHealthMetrics.ChainBuilds.Add(1, new TagList { { "source", "cache" } }); return cached; }
             long started = Stopwatch.GetTimestamp();
             using (X509Chain x509Chain = new X509Chain())
             {
-                if (extraStore != null) x509Chain.ChainPolicy.ExtraStore.AddRange(extraStore);
+                if (extra != null) x509Chain.ChainPolicy.ExtraStore.AddRange(extra);
                 x509Chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                if (CustomTrustStore != null)
+                if (trust != null)
                 {
+#if LEGACY_RUNTIME
+                    x509Chain.ChainPolicy.ExtraStore.AddRange(trust);
+#else
                     x509Chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                    x509Chain.ChainPolicy.CustomTrustStore.AddRange(CustomTrustStore);
+                    x509Chain.ChainPolicy.CustomTrustStore.AddRange(trust);
+#endif
                 }
                 x509Chain.ChainPolicy.VerificationTime = validationTime;
                 x509Chain.ChainPolicy.UrlRetrievalTimeout = OperationScope.LimitTimeout(UrlRetrievalTimeout);
 #if NET5_0_OR_GREATER
-                x509Chain.ChainPolicy.DisableCertificateDownloads = DisableCertificateDownloads;
+                x509Chain.ChainPolicy.DisableCertificateDownloads = disableDownloads;
 #endif
                 x509Chain.Build(cert);
                 EHealthMetrics.Record(EHealthMetrics.ChainBuilds, EHealthMetrics.ChainBuildDuration, started, new TagList { { "source", "platform" } });
@@ -139,10 +150,36 @@ namespace Egelke.EHealth.Client.Pki
                 {
                     chain.ChainElements.Add(new ChainElement(x509Element));
                 }
-                ChainCache.Put(key, chain);
+#if LEGACY_RUNTIME
+                if (trust != null && chain.ChainElements.Count != 0)
+                {
+                    var root = chain.ChainElements[chain.ChainElements.Count - 1];
+                    if (trust.Cast<X509Certificate2>().Any(anchor => anchor.Thumbprint == root.Certificate.Thumbprint))
+                    {
+                        // Only replace the trust-anchor decision. Preserve signature,
+                        // usage, time, constraints and all other platform errors.
+                        RemoveAnchorErrors(chain.ChainStatus);
+                        foreach (var element in chain.ChainElements) RemoveAnchorErrors(element.ChainElementStatus);
+                    }
+                    else AddErrorStatus(chain.ChainStatus, root.ChainElementStatus, X509ChainStatusFlags.UntrustedRoot, "The root is not in the explicit trust store");
+                }
+#endif
+                ChainCache.Put(generation, key, chain);
                 return chain;
             }
         }
+
+#if LEGACY_RUNTIME
+        private static void RemoveAnchorErrors(List<X509ChainStatus> statuses)
+        {
+            for (int i = statuses.Count - 1; i >= 0; i--)
+            {
+                var status = statuses[i];
+                status.Status &= ~(X509ChainStatusFlags.UntrustedRoot | X509ChainStatusFlags.PartialChain);
+                if (status.Status == X509ChainStatusFlags.NoError) statuses.RemoveAt(i); else statuses[i] = status;
+            }
+        }
+#endif
 
         /// <summary>
         /// Dispose every certificate in the collection and empty it.

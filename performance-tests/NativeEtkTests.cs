@@ -9,6 +9,7 @@ using Org.BouncyCastle.Crypto.Operators;
 using Org.BouncyCastle.Math;
 using Org.BouncyCastle.Utilities.Collections;
 using Xunit;
+using TrustStatus = Egelke.EHealth.Etee.Crypto.Status.TrustStatus;
 
 [Collection("Revocation")]
 public class NativeEtkTests
@@ -31,7 +32,7 @@ public class NativeEtkTests
             Assert.Equal(encryption.GetEncoded(), token.ToCertificate().RawData);
             Assert.Same(token.ToCertificate(), token.ToCertificate());
             var validation = await token.VerifyAsync(false);
-            Assert.Equal(ValidationStatus.Valid, validation.ValidationStatus);
+            Assert.True(validation.ValidationStatus == ValidationStatus.Valid, validation.ToString());
             Assert.Equal(TrustStatus.Full, validation.TrustStatus);
             Assert.Equal(auth.GetEncoded(), validation.IssuerInfo.Certificate.RawData);
         }

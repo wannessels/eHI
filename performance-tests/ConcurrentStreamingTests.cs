@@ -42,7 +42,7 @@ public class ConcurrentStreamingTests
                 using (result.UnsealedData)
                 {
                     Assert.Equal(ValidationStatus.Valid, result.SecurityInformation.ValidationStatus);
-                    Assert.Equal(SHA256.HashData(bytes[index + 1]), await SHA256.HashDataAsync(result.UnsealedData));
+                    Assert.Equal(SHA256.HashData(bytes[index + 1]), await RuntimeCompat.HashStreamAsync(result.UnsealedData));
                 }
             }));
             Assert.All(inputs, input => Assert.True(input.CanRead));
@@ -73,7 +73,7 @@ public class ConcurrentStreamingTests
             using (result.UnsealedData)
             {
                 Assert.Equal(ValidationStatus.Valid, result.SecurityInformation.ValidationStatus);
-                Assert.Equal(SHA256.HashData(bytes), SHA256.HashData(result.UnsealedData));
+                Assert.Equal(SHA256.HashData(bytes), RuntimeCompat.HashStream(result.UnsealedData));
             }
         }
         finally { Settings.Default.SignRetries = previous; (sealer as IDisposable)?.Dispose(); (receiver as IDisposable)?.Dispose(); }
@@ -86,7 +86,7 @@ public class ConcurrentStreamingTests
         internal AsyncOnlyInput(byte[] content, Task ready) { this.content = content; this.ready = ready; }
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
         {
-            ObjectDisposedException.ThrowIf(disposed, this); await ready.WaitAsync(token);
+            RuntimeCompat.ThrowIfDisposed(disposed, this); await ready.WaitAsync(token);
             int count = Math.Min(buffer.Length, Math.Min(17011, content.Length - BytesRead));
             content.AsMemory(BytesRead, count).CopyTo(buffer); BytesRead += count; return count;
         }

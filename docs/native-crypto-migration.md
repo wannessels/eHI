@@ -1,8 +1,8 @@
-# Native cryptography migration (.NET 8)
+# Native cryptography and runtime compatibility
 
-The production libraries target **.NET 8**. Native .NET message cryptography is the default, with a selectable BouncyCastle streaming backend. Public interfaces retain the native migration's PKI types; switching the backend does not change the API or wire format.
+The production libraries target **.NET Framework 4.6.2, .NET Standard 2.0, .NET 6 and .NET 8**. Native message cryptography is the default, with a selectable BouncyCastle streaming backend. Older runtimes use portable metadata and API compatibility implementations. See [runtime support and CI](runtime-support.md) for the tested matrix and target-specific APIs. Switching the message backend does not change the wire format.
 
-BouncyCastle.Cryptography is a production dependency of `etee-crypto` again, including when native mode is selected. PKI and transport libraries do not directly reference it. The Java interoperability test project retains its independent implementation.
+BouncyCastle.Cryptography is a production dependency of `etee-crypto`, including when native mode is selected. It is also a PKI dependency on Framework/Standard for APIs those runtimes lack; .NET 6/8 PKI and core assemblies remain independent of it. The Java interoperability test retains its independent implementation.
 
 ## Backend selection
 
@@ -19,13 +19,13 @@ For concurrent comparisons without changing global configuration, every factory 
 var factory = new DataSealerFactory(loggerFactory, useNativeCrypto: false);
 ```
 
-The switch covers RSA-PSS/ECDSA message signing and verification, AES-CBC content encryption/decryption, RSA/AES recipient key wrapping, and streaming CMS construction/parsing/completion. Both implementations share signature metadata handling and certificate, timestamp and revocation policy. PKCS#12 loading, ETK parsing, CRL/OCSP, RFC 3161 and SOAP/STS stay on the current platform implementation; this is not a rollback of the entire PKI migration.
+The switch covers RSA-PSS/PKCS#1/ECDSA message signing and verification, AES-CBC content encryption/decryption, RSA/AES recipient key wrapping, and streaming CMS construction/parsing/completion. Both implementations share signature metadata handling and certificate, timestamp and revocation policy. PKCS#12 loading, ETK parsing, CRL/OCSP, RFC 3161 and SOAP/STS remain in the shared PKI/transport layer, using compatibility implementations where the target requires them. Selecting BouncyCastle does not restore the old validation policy.
 
-BouncyCastle mode exports private keys into managed key parameters. Use native mode for non-exportable keys or hardware key providers. There is no automatic fallback between backends. Both modes keep the existing admission and cancellation policy; individual cryptographic primitive calls cannot be interrupted midway.
+BouncyCastle mode exports private keys into managed key parameters. Native mode can use non-exportable keys and hardware providers. RSA CMS signing defaults to PSS; for a PKCS#1-only provider explicitly select `Settings.Default.RsaSignaturePadding = RSASignaturePadding.Pkcs1` or the padding override on `DataSealerFactory`/`EhDataSealerFactory`, provided the receiving service accepts it. There is no automatic backend or padding fallback. Both modes keep the existing admission and cancellation policy; individual cryptographic primitive calls cannot be interrupted midway. See the [review fixes and provider compatibility table](performance-review-follow-up.md).
 
 ## Compatibility changes
 
-This is a breaking migration: .NET Framework 4.6.2, .NET Standard 2.0 and .NET 6 library targets have been removed. The existing seal/unseal/service interfaces remain, but public PKI methods no longer expose BouncyCastle types.
+The previous runtime targets have been restored, but API changes remain. Existing synchronous seal/unseal/service methods remain, while the crypto interfaces add required async members that custom implementations must supply, and public PKI methods replace their former BouncyCastle types. Framework/Standard timestamp extensions return `PortableTimestampToken`; .NET 6/8 use the platform token type shown below.
 
 | Previous type/API | Replacement |
 |---|---|
@@ -40,7 +40,7 @@ This is a breaking migration: .NET Framework 4.6.2, .NET Standard 2.0 and .NET 6
 
 `ToTimeStampToken`, `IsMatch`, `Validate` and `ValidateAsync` remain extension methods in the PKI namespace. Revocation lists passed to chain/timestamp verification must use the new evidence types. `GetEncoded()` returns DER evidence suitable for CAdES attributes.
 
-The old signing-only flag has been removed. Use `Settings.Default.UseNativeCrypto` to select the **whole message backend**. Native RSA signing requires a platform key provider supporting PSS; verification retains the configured RSA-PKCS#1 and ECDSA eHealth algorithms. Native PSS uses MGF1 with the same digest and a digest-sized salt; unsupported PSS parameter combinations fail validation instead of downgrading algorithms.
+The old signing-only flag has been removed. Use `Settings.Default.UseNativeCrypto` to select the **whole message backend**. Native RSA signing requires provider support for the selected padding (PSS by default, or explicit PKCS#1); verification retains the configured RSA-PKCS#1 and ECDSA eHealth algorithms. Native PSS uses MGF1 with the same digest and a digest-sized salt; unsupported PSS parameter combinations fail validation instead of downgrading algorithms. Null verification/unsealing levels still check signer revocation, without requiring a timestamp.
 
 PKCS#12 imports preserve named aliases, private-key associations and repeated CA-bag behavior. Password/MAC validation and import limits are provided by the platform loader. Certificates are owned by `EHealthP12`; borrowed certificates must outlive active client operations. Native decryption no longer exports private keys to construct managed key pairs.
 
@@ -48,11 +48,11 @@ System trust remains the default. Applications needing explicit private trust an
 
 ## Memory behavior
 
-Native mode now streams payloads through incremental hashing, platform RSA/ECDSA signatures and native AES `CryptoStream` transforms. Its CMS framing reader accepts definite DER and chunked/indefinite BER payloads without flattening the full content. Platform `SignedCms` is used only for bounded signature metadata and the shared validation/completion policy. Legacy signatures without signed attributes also verify incrementally in native mode.
+Native mode streams payloads through incremental hashing, platform RSA/ECDSA signatures and native AES `CryptoStream` transforms. Its CMS framing reader accepts definite DER and chunked/indefinite BER payloads without flattening the full content. Signature metadata is bounded and handled by platform `SignedCms` on .NET 6/8 or the portable metadata implementation on older targets. Legacy signatures without signed attributes also verify incrementally in native mode.
 
-Native sealing is a single-pass pipeline: plaintext flows through inner hashing/signing, AES encryption and outer hashing/signing into the final result. Non-seekable input is not spooled or replayed, including during an outer-signature retry. Output uses standard chunked BER CMS. Unsealing is a single pass as well: the encrypted envelope streams through the outer digest and decryption into inner verification and final output without an intermediate spool. The outer signature is verified once the whole message has been read, the recipient certificate reported in the result is selected afterwards by the validated signing time, and every status check still gates the returned plaintext.
+Native sealing is a single-pass pipeline: plaintext flows through inner hashing/signing, AES encryption and outer hashing/signing into the final result. Non-seekable input is not spooled or replayed, including during an outer-signature retry. Output uses standard chunked BER CMS. Unsealing is a single pass as well: the encrypted envelope streams through the outer digest and decryption into inner verification and final output without an intermediate spool. The outer signature is verified once the whole message has been read. Recipient selection then considers all matching entries at the signing time; a different selected entry must unwrap the same content key used for decryption. Validation and trust results accompany the plaintext stream, and callers must check them before using it.
 
-Each retained native stage/output spills to a temporary file above `Settings.Default.InMemorySize`; the default is `long.MaxValue`, so nothing spills unless the application sets a finite size at startup, in which case known large stages start on disk. Payload copies and native temporary-file I/O are asynchronous; small ASN.1 framing/metadata operations and cryptographic primitives still run synchronously. Caller streams stay open, returned streams belong to the caller, and failed/cancelled operations dispose their temporary streams. Completed unseal results retain the existing security-status API: callers must check validation/trust status before using plaintext.
+Each retained native stage/output spills to a temporary file above `Settings.Default.InMemorySize`; the default is **16 MiB per stream**, and known large stages start on disk. An application can explicitly disable spilling with `long.MaxValue` at startup. Payload copies and native temporary-file I/O are asynchronous; small ASN.1 framing/metadata operations and cryptographic primitives still run synchronously. Caller streams stay open, returned streams belong to the caller, and failed/cancelled operations dispose their temporary streams. Completed unseal results retain the existing security-status API: callers must check validation/trust status before using plaintext.
 
 `Settings.Default.MaximumNativeMetadataSize` limits aggregate decoded metadata to 16 MiB per CMS layer, excluding payloads. BER nesting is limited to 32 levels. Certificates, CRLs/OCSP and timestamps still consume memory, and each active operation has its own buffers and temporary stages; the stream threshold is not a process-memory cap. Native CMS no longer imposes a whole-payload 32-bit array limit. The native eHealth profile rejects CMS countersignatures rather than silently omitting their validation; supported signature timestamps continue through the existing timestamp policy.
 
@@ -70,7 +70,7 @@ The deterministic suite covers:
 - Backend selection, pinned factories, large-message streaming, non-seekable inputs, and changed content in either signature layer.
 - An assembly-reference assertion that PKI and transport remain independent of BouncyCastle.
 
-The tests use generated credentials, public historical fixtures and localhost responders. They do not exercise live eHealth endpoints or private production credentials. Production and test projects build for .NET 8.
+The self-contained tests use generated credentials, public historical fixtures and localhost responders. They do not exercise live eHealth endpoints or private production credentials. CI builds all production targets and runs the applicable test projects for each [supported test target](runtime-support.md). External/hardware tests are explicit opt-ins.
 
 Run:
 

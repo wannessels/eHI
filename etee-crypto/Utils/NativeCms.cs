@@ -67,13 +67,13 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             if (cms.SignerInfos.Count != 1) throw new InvalidMessageException("An eHealth message must contain exactly one signer");
             return cms.SignerInfos[0];
         }
-        internal static byte[] KeyId(SignerInfo signer) => signer.SignerIdentifier.Type == SubjectIdentifierType.SubjectKeyIdentifier ? Convert.FromHexString((string)signer.SignerIdentifier.Value) : null;
+        internal static byte[] KeyId(SignerInfo signer) => signer.SignerIdentifier.Type == SubjectIdentifierType.SubjectKeyIdentifier ? RuntimeCompat.FromHexString((string)signer.SignerIdentifier.Value) : null;
         internal static bool Matches(SignerInfo signer, X509Certificate2 cert)
         {
             if (signer.SignerIdentifier.Type == SubjectIdentifierType.SubjectKeyIdentifier) return CryptoEncoding.SubjectKeyIdentifier(cert).AsSpan().SequenceEqual(KeyId(signer));
             if (signer.SignerIdentifier.Type != SubjectIdentifierType.IssuerAndSerialNumber) return false;
             var id = (X509IssuerSerial)signer.SignerIdentifier.Value;
-            return CryptoEncoding.SerialKey(CryptoEncoding.Serial(cert)) == CryptoEncoding.SerialKey(Convert.FromHexString(id.SerialNumber)) &&
+            return CryptoEncoding.SerialKey(CryptoEncoding.Serial(cert)) == CryptoEncoding.SerialKey(RuntimeCompat.FromHexString(id.SerialNumber)) &&
                 CryptoEncoding.NamesEqual(new X500DistinguishedName(id.IssuerName).RawData, cert.IssuerName.RawData);
         }
         internal static X509Certificate2 FindSigner(SignedCms cms, X509Certificate2Collection certificates)
@@ -115,7 +115,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                     writer.WriteEncodedValue(new X500DistinguishedName("CN=Key identifier carrier").RawData);
                     using (writer.PushSequence()) { writer.WriteUtcTime(DateTimeOffset.UtcNow.AddDays(-1)); writer.WriteUtcTime(DateTimeOffset.UtcNow.AddYears(1)); }
                     writer.WriteEncodedValue(new X500DistinguishedName("CN=Key identifier carrier").RawData);
-                    writer.WriteEncodedValue(key.ExportSubjectPublicKeyInfo());
+                    writer.WriteEncodedValue(RuntimeCompat.ExportPublicKey(key));
                     using (writer.PushSequence(CryptoEncoding.Context(3))) using (writer.PushSequence()) using (writer.PushSequence())
                     {
                         writer.WriteObjectIdentifier("2.5.29.14"); var ski = new AsnWriter(AsnEncodingRules.DER); ski.WriteOctetString(id); writer.WriteOctetString(ski.Encode());
@@ -225,11 +225,11 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             {
                 this.aes = aes; this.output = output;
                 payload = new BerOctetWriter(output, 0xA0);
-                transform = aes.CreateEncryptor(); Content = new CryptoStream(payload, transform, CryptoStreamMode.Write, true);
+                transform = aes.CreateEncryptor(); Content = RuntimeCompat.CreateCryptoStream(payload, transform, CryptoStreamMode.Write);
             }
             internal async System.Threading.Tasks.Task CompleteAsync()
             {
-                await Content.FlushFinalBlockAsync(OperationScope.Cancellation).ConfigureAwait(false);
+                await RuntimeCompat.FlushFinalBlockAsync(Content, OperationScope.Cancellation).ConfigureAwait(false);
                 await payload.CompleteAsync().ConfigureAwait(false); BerOctetWriter.End(output, 4);
             }
             public void Dispose()
@@ -253,8 +253,14 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         }
         internal sealed class Decryption : IDisposable
         {
+            internal sealed class Recipient
+            {
+                internal X509Certificate2 Certificate;
+                internal byte[] WrappedKey;
+            }
             internal byte[] KeyId;
-            internal X509Certificate2[] Candidates = Array.Empty<X509Certificate2>();
+            internal readonly List<Recipient> Recipients = new();
+            internal Recipient DecryptedRecipient;
             internal AsymmetricAlgorithm PublicKey;
             internal string KeyAlgorithm;
             internal int KeySize;
@@ -262,9 +268,31 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             internal BerStreamReader Framing;
             internal Aes Aes;
             internal ICryptoTransform Transform;
-            // Matching certificates share the recipient key; the reported one is chosen once the signing time is known.
+            // The signing time follows the payload. Keep all matching recipient
+            // entries and bind the final identity to the key actually used above.
             internal X509Certificate2 SelectCertificate(DateTime date)
-                => Candidates.OrderByDescending(c => CryptoEncoding.ValidAt(c, date)).ThenByDescending(c => c.NotBefore).FirstOrDefault();
+            {
+                Recipient selected = null;
+                foreach (var candidate in Recipients)
+                    if (candidate.Certificate.IsBetter(selected?.Certificate, date)) selected = candidate;
+                if (selected == null) return null;
+                if (!ReferenceEquals(selected, DecryptedRecipient))
+                {
+                    OperationScope.Cancellation.ThrowIfCancellationRequested();
+                    using var rsa = selected.Certificate.GetRSAPrivateKey();
+                    if (rsa == null) throw new InvalidMessageException("Recipient certificate must use RSA");
+                    byte[] recovered = rsa.Decrypt(selected.WrappedKey, RSAEncryptionPadding.Pkcs1);
+                    byte[] used = Aes.Key;
+                    try
+                    {
+                        if (!CryptographicOperations.FixedTimeEquals(recovered, used))
+                            throw new InvalidMessageException("Recipient entries contain different content encryption keys");
+                    }
+                    finally { CryptographicOperations.ZeroMemory(recovered); CryptographicOperations.ZeroMemory(used); }
+                }
+                KeyId = CryptoEncoding.SubjectKeyIdentifier(selected.Certificate);
+                return selected.Certificate;
+            }
             internal void Complete()
             {
                 if (Content.ReadByte() != -1) throw new InvalidMessageException("Unexpected decrypted trailing content");
@@ -291,6 +319,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             int aesBits = algorithm.Oid switch { Aes128Cbc => 128, "2.16.840.1.101.3.4.1.22" => 192, "2.16.840.1.101.3.4.1.42" => 256, _ => throw new InvalidMessageException("Unsupported content encryption algorithm") };
             var ivReader = new AsnReader(algorithm.Parameters, AsnEncodingRules.DER); byte[] iv = ivReader.ReadOctetString(); ivReader.ThrowIfNotEmpty();
             byte[] key = null; var result = new Decryption();
+            WebKey selectedWeb = null; byte[] webWrappedKey = null;
             try
             {
                 while (recipients.HasData)
@@ -312,24 +341,39 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                     if (transport.PeekTag().HasSameClassAndValue(CryptoEncoding.Context(0, false))) ski = transport.ReadOctetString(CryptoEncoding.Context(0, false));
                     else { var identity = transport.ReadSequence(); issuer = identity.ReadEncodedValue().ToArray(); serial = CryptoEncoding.SerialKey(identity.ReadIntegerBytes().Span); identity.ThrowIfNotEmpty(); }
                     var keyAlg = CryptoEncoding.ReadAlgorithm(transport); byte[] wrappedKey = transport.ReadOctetString(); transport.ThrowIfNotEmpty();
-                    if (keyAlg.Oid != CryptoEncoding.Rsa) throw new InvalidMessageException("Unsupported RSA key transport algorithm");
+                    if (keyAlg.Oid != CryptoEncoding.Rsa) continue; // Another recipient must not prevent using a supported entry.
                     var candidates = (certificates ?? new X509Certificate2Collection()).Cast<X509Certificate2>().Where(c => c.HasPrivateKey && (ski != null ? CryptoEncoding.SubjectKeyIdentifier(c).AsSpan().SequenceEqual(ski) : CryptoEncoding.SerialKey(CryptoEncoding.Serial(c)) == serial && CryptoEncoding.NamesEqual(c.IssuerName.RawData, issuer)))
-                        .OrderByDescending(c => c.NotBefore).ToArray();
-                    if (candidates.Length != 0)
-                    {
-                        using var rsa = candidates[0].GetRSAPrivateKey(); if (rsa == null) continue;
-                        key = rsa.Decrypt(wrappedKey, RSAEncryptionPadding.Pkcs1); result.Candidates = candidates; result.KeyId = CryptoEncoding.SubjectKeyIdentifier(candidates[0]); result.KeySize = rsa.KeySize; result.KeyAlgorithm = keyAlg.Oid; break;
-                    }
+                        .Where(c => PublicKeyCache.Get(c) is RSA).OrderByDescending(c => c.NotBefore).ToArray();
+                    foreach (var candidate in candidates)
+                        result.Recipients.Add(new Decryption.Recipient { Certificate = candidate, WrappedKey = wrappedKey });
                     var web = (webKeys ?? Array.Empty<WebKey>()).FirstOrDefault(w => ski != null && w.Id.AsSpan().SequenceEqual(ski));
-                    if (web?.NativeKey is RSA rsaWeb)
-                    { lock (rsaWeb) key = rsaWeb.Decrypt(wrappedKey, RSAEncryptionPadding.Pkcs1); result.KeyId = ski; result.PublicKey = rsaWeb; result.KeyAlgorithm = keyAlg.Oid; result.KeySize = rsaWeb.KeySize; break; }
+                    if (selectedWeb == null && web?.NativeKey is RSA)
+                    { selectedWeb = web; webWrappedKey = wrappedKey; }
+                }
+                if (secret == null)
+                {
+                    // Select a provisional recipient for streaming. Final selection
+                    // is made across all entries using the verified signing time.
+                    foreach (var candidate in result.Recipients)
+                    {
+                        OperationScope.Cancellation.ThrowIfCancellationRequested();
+                        using var rsa = candidate.Certificate.GetRSAPrivateKey(); if (rsa == null) continue;
+                        key = rsa.Decrypt(candidate.WrappedKey, RSAEncryptionPadding.Pkcs1);
+                        result.DecryptedRecipient = candidate; result.KeyId = CryptoEncoding.SubjectKeyIdentifier(candidate.Certificate);
+                        result.KeySize = rsa.KeySize; result.KeyAlgorithm = CryptoEncoding.Rsa; break;
+                    }
+                    if (key == null && selectedWeb?.NativeKey is RSA rsaWeb)
+                    {
+                        lock (rsaWeb) key = rsaWeb.Decrypt(webWrappedKey, RSAEncryptionPadding.Pkcs1);
+                        result.KeyId = selectedWeb.Id; result.PublicKey = rsaWeb; result.KeyAlgorithm = CryptoEncoding.Rsa; result.KeySize = rsaWeb.KeySize;
+                    }
                 }
                 if (key == null) throw new InvalidMessageException("The message is not addressed to an available recipient");
                 if (key.Length * 8 != aesBits || iv.Length != 16) throw new InvalidMessageException("Invalid AES parameters");
                 OperationScope.Cancellation.ThrowIfCancellationRequested();
                 result.Aes = Aes.Create(); result.Aes.Key = key; result.Aes.IV = iv;
                 result.Transform = result.Aes.CreateDecryptor(); result.Framing = framing;
-                result.Content = new CryptoStream(framing.OpenOctets(0x80), result.Transform, CryptoStreamMode.Read, true);
+                result.Content = RuntimeCompat.CreateCryptoStream(framing.OpenOctets(0x80), result.Transform, CryptoStreamMode.Read);
                 return result;
             }
             catch { result.Dispose(); throw; }

@@ -63,7 +63,7 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
         /// <seealso cref="Create(Level?, EHealthP12[])"/>
         /// <param name="encCerts">Own (eHealth issued) certificates with private key that can be used to decrypt, private keys are used through their platform provider and need not be exportable</param>
         /// <param name="authCertChains">Own eHealth issued certificate that where used to create encryption certificates, with the chain if not present in the windows store</param>
-        /// <param name="level">The required level of the sender signatures or <c>null</c> for only basic validation without revocation checks</param>
+        /// <param name="level">The required level of the sender signatures; <c>null</c> still checks signer revocation but does not require a timestamp</param>
         /// <returns>Instance of the IDataUnsealer</returns>
         public
             IDataUnsealer Create(Level? level, X509Certificate2Collection encCerts, X509Certificate2Collection authCertChains, params WebKey[] ownWebKeys)
@@ -83,7 +83,7 @@ namespace Egelke.EHealth.Etee.Crypto.Receiver
         /// in order to unseal historical messages.  It may even include revoked certificates, this that
         /// doesn't mean the message that is sealed with it is invalid, just that it isn't confidential any more.
         /// </para>
-        /// <param name="level">The required level of the sender signatures or <c>null</c> for only basic validation without revocation checks</param>
+        /// <param name="level">The required level of the sender signatures; <c>null</c> still checks signer revocation but does not require a timestamp</param>
         /// <param name="p12s">Own eHealth issues certificates in the form of a eHealth pkcs12 wrapper class</param>
         /// <returns>Instance of the IDataUnsealer</returns>
         public IDataUnsealer Create(Level? level, params EHealthP12[] p12s)

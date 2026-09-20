@@ -15,13 +15,13 @@ namespace Egelke.EHealth.Client.Pki.Test
     public class EHealthP12Tests
     {
         private EHealthP12 dummyP12;
-        private readonly EHealthP12 realP12;
+        private readonly Lazy<EHealthP12> real = new Lazy<EHealthP12>(() => new EHealthP12(Path.Combine("files", "EHealthP12", "eHealth.acc-p12"), File.ReadAllText(Path.Combine("files", "EHealthP12", "eHealth.acc-p12.pwd"))));
+        private EHealthP12 realP12 => real.Value;
 
 
         public EHealthP12Tests()
         {
             dummyP12 = new EHealthP12(@"EHealthP12/dummy.p12", "test001");
-            realP12 = new EHealthP12(@"files\EHealthP12\eHealth.acc-p12", File.ReadAllText(@"files\EHealthP12\eHealth.acc-p12.pwd"));
         }
 
         [Fact]
@@ -222,7 +222,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             }
         }
 
-        [Fact]
+        [IntegrationFact]
         public void RealAuthValue()
         {
             X509Certificate2 cert = realP12["authentication"];
@@ -257,7 +257,7 @@ namespace Egelke.EHealth.Client.Pki.Test
 
 
 
-        [Fact]
+        [IntegrationFact]
         public void RealEncValue()
         {
             X509Certificate2 auth = realP12["authentication"];
@@ -283,7 +283,7 @@ namespace Egelke.EHealth.Client.Pki.Test
         }
 
         /*
-        [Fact]
+        [IntegrationFact]
         public void ReinstallInCurrentUser()
         {
             //Prepare

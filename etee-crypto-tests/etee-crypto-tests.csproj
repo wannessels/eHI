@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net462;net472;net481;net6.0;net8.0</TargetFrameworks>
     <RootNamespace>etee_crypto_tests</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
@@ -22,6 +22,18 @@
     <ProjectReference Include="..\services\services.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="System.ServiceModel.Http" Version="8.1.2" />
+    <PackageReference Include="System.ServiceModel.Http" Version="8.1.2" Condition="'$(TargetFramework)' == 'net8.0'" />
   </ItemGroup>
-</Project>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
+    <PackageReference Include="System.ServiceModel.Http" Version="6.2.0" />
+    <PackageReference Include="System.ServiceModel.Federation" Version="6.2.0" />
+  </ItemGroup>
+  <ItemGroup Condition="$(TargetFramework.StartsWith('net4'))">
+    <Reference Include="System.ServiceModel" />
+    <Reference Include="System.IdentityModel" />
+    <Reference Include="System.Security" />
+  </ItemGroup>
+  <PropertyGroup>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+  </PropertyGroup></Project>

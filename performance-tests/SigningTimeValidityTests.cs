@@ -21,10 +21,12 @@ public class SigningTimeValidityTests
     [InlineData(true)] [InlineData(false)]
     public async Task CertificateExpiredAfterSigningStillValidatesAtSigningTime(bool native)
     {
+        using var server = new PkiFixture.FixtureServer();
         var rootKey = PkiFixture.NewKey(); var key = PkiFixture.NewKey();
         var expiry = DateTime.UtcNow.AddSeconds(3);
         var root = PkiFixture.MakeCert("CN=Short Root", BigInteger.One, rootKey, null, null);
-        var leaf = PkiFixture.MakeCert("SERIALNUMBER=42, CN=Short Signer", BigInteger.Two, key, root, rootKey, notAfter: expiry);
+        var leaf = PkiFixture.MakeCert("SERIALNUMBER=42, CN=Short Signer", BigInteger.Two, key, root, rootKey, notAfter: expiry, crl: server.Url + "crl");
+        server.Crl = PkiFixture.MakeCrl(root, rootKey).GetEncoded();
         using var rootCert = new X509Certificate2(root.GetEncoded());
         using var rsa = RSA.Create(); rsa.ImportParameters(DotNetUtilities.ToRSAParameters((RsaPrivateCrtKeyParameters)key.Private));
         using var publicCert = new X509Certificate2(leaf.GetEncoded()); using var signer = publicCert.CopyWithPrivateKey(rsa);

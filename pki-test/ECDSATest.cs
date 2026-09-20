@@ -159,7 +159,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             }
         }
 
-        [SkippableFact]
+        [HardwareFact]
         public void LiveEID()
         {
             using (var readers = new Readers(ReaderScope.User))

@@ -36,10 +36,10 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             public void Dispose() { if (owned) Stream.Dispose(); }
         }
 
-        internal static AsymmetricKeyParameter PublicKey(WebKey key) => PublicKeyFactory.CreateKey(key.NativeKey.ExportSubjectPublicKeyInfo());
+        internal static AsymmetricKeyParameter PublicKey(WebKey key) => PublicKeyFactory.CreateKey(RuntimeCompat.ExportPublicKey(key.NativeKey));
         internal static AsymmetricKeyParameter PrivateKey(AsymmetricAlgorithm key)
         {
-            byte[] encoded = key.ExportPkcs8PrivateKey();
+            byte[] encoded = RuntimeCompat.ExportPrivateKey(key);
             try { return PrivateKeyFactory.CreateKey(encoded); }
             finally { CryptographicOperations.ZeroMemory(encoded); }
         }
@@ -53,7 +53,27 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             {
                 using var key = (AsymmetricAlgorithm)value.GetRSAPrivateKey() ?? value.GetECDsaPrivateKey()
                     ?? throw new CryptographicException("An RSA or ECDSA private key is required");
+#if LEGACY_RUNTIME
+                try { return PrivateKey(key); }
+                catch (CryptographicException)
+                {
+                    // Framework CNG imports may permit encrypted export without
+                    // permitting ExportParameters. Respect that policy via PKCS#12;
+                    // genuinely non-exportable keys still fail at Export below.
+                    char[] password = Convert.ToBase64String(RuntimeCompat.RandomBytes(32)).ToCharArray();
+                    byte[] encoded = null;
+                    try
+                    {
+                        encoded = value.Export(X509ContentType.Pkcs12, new string(password));
+                        var store = new Org.BouncyCastle.Pkcs.Pkcs12StoreBuilder().Build();
+                        using (var stream = new MemoryStream(encoded, false)) store.Load(stream, password);
+                        return store.GetKey(store.Aliases.Single(store.IsKeyEntry)).Key;
+                    }
+                    finally { if (encoded != null) CryptographicOperations.ZeroMemory(encoded); Array.Clear(password, 0, password.Length); }
+                }
+#else
                 return PrivateKey(key);
+#endif
             })).Value;
             internal void Clear() { certificates.Clear(); webKeys.Clear(); }
         }

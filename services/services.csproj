@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net462;netstandard2.0;net6.0;net8.0</TargetFrameworks>
     <RootNamespace>Egelke.EHealth.Client.Services</RootNamespace>
     <AssemblyName>Egelke.EHealth.Client.Services</AssemblyName>
     <Version>0.1.0</Version>
@@ -18,6 +18,12 @@
     <Folder Include="wsdl\cin-encryption\" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="System.ServiceModel.Http" Version="8.1.2" />
+    <PackageReference Include="System.ServiceModel.Http" Version="8.1.2" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="System.ServiceModel.Http" Version="6.2.0" Condition="'$(TargetFramework)' == 'net6.0'" />
+    <PackageReference Include="System.ServiceModel.Http" Version="4.10.3" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+    <Reference Include="System.ServiceModel" />
+    <Reference Include="System.IdentityModel" />
   </ItemGroup>
 </Project>

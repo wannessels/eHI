@@ -31,22 +31,20 @@ namespace Egelke.EHealth.Client
     {
 
         /// <summary>
-        /// Information about your (client) product, defaults to Entry Assembly.
+        /// Information about your product, using the entry assembly or this library when hosted without one.
         /// </summary>
-        public SoftwareInfo Product { get; set; } = new SoftwareInfo()
-        {
-            Name = Assembly.GetEntryAssembly().GetName().Name,
-            Version = Assembly.GetEntryAssembly().GetName().Version,
-        };
+        public SoftwareInfo Product { get; set; } = Describe(Assembly.GetEntryAssembly() ?? typeof(TracingConfig).Assembly);
 
         /// <summary>
         /// Information about this library, default so to Executing Assembly.
         /// </summary>
-        public SoftwareInfo Connector { get; set; } = new SoftwareInfo()
+        public SoftwareInfo Connector { get; set; } = Describe(typeof(TracingConfig).Assembly);
+
+        private static SoftwareInfo Describe(Assembly assembly)
         {
-            Name = Assembly.GetExecutingAssembly().GetName().Name,
-            Version = Assembly.GetExecutingAssembly().GetName().Version,
-        };
+            var name = assembly.GetName();
+            return new SoftwareInfo { Name = name.Name, Version = name.Version ?? new Version(0, 0) };
+        }
 
         /// <summary>
         /// Contact e-mail, default to null.

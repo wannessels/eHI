@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IdentityModel.Claims;
 using System.IO;
@@ -53,7 +53,7 @@ namespace services_tests
             receiverClient.Endpoint.EndpointBehaviors.Add(new LoggingEndpointBehavior(loggerFactory.CreateLogger<LoggingMessageInspector>()));
         }
 
-        [Fact]
+        [IntegrationFact]
         public void AllowAllDoctorsUsingBooleanAttr()
         {
             //sender creates a new key for all doctors
@@ -71,7 +71,7 @@ namespace services_tests
             Assert.Equal(senderKey, receiverKey);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void AllowAllDoctorsAndNursesUsingEmptyNihiiValues()
         {
             //sender creates a new key for all doctors and nurse
@@ -94,7 +94,7 @@ namespace services_tests
             Assert.Equal(senderKey, receiverKey);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void AllowNurseButCallDoctor()
         {
             //sender creates a new key for all nurses but not doctors

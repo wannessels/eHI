@@ -20,10 +20,9 @@ namespace library_core_tests
             Assert.Equal("Egelke.EHealth.Client", target.Connector.Name);
             Assert.Equal("3.0.0.2", target.Connector.Version.ToString());
 
-            Assert.Equal("testhost", target.Product.Name);
-            Assert.Equal("15.0.0.0", target.Product.Version.ToString());
-
-            Assert.Equal("testhost/15.0.0.0 Egelke.EHealth.Client/3.0.0.2", target.ToAgent());
+            Assert.False(string.IsNullOrWhiteSpace(target.Product.Name));
+            Assert.NotNull(target.Product.Version);
+            Assert.Equal(target.Product.Name + "/" + target.Product.Version + " Egelke.EHealth.Client/3.0.0.2", target.ToAgent());
         }
     }
 }

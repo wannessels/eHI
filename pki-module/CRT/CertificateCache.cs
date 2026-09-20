@@ -18,11 +18,15 @@ namespace Egelke.EHealth.Client.Pki
         /// <summary>Returns a caller-owned copy of the certificate with this DER encoding, decoding it only the first time.</summary>
         public static X509Certificate2 Load(ReadOnlySpan<byte> encoded)
         {
-            string key = Convert.ToHexString(SHA1.HashData(encoded));
+            string key = RuntimeCompat.ToHexString(CryptoEncoding.Hash(CryptoEncoding.Sha1, encoded));
             if (!entries.TryGetValue(key, out var cached))
             {
                 if (entries.Count >= EntryLimit) entries.Clear();
+#if LEGACY_RUNTIME
+                var decoded = new X509Certificate2(encoded.ToArray());
+#else
                 var decoded = new X509Certificate2(encoded);
+#endif
                 cached = entries.GetOrAdd(key, decoded);
                 if (!ReferenceEquals(cached, decoded)) decoded.Dispose();
             }

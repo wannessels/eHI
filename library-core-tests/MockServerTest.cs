@@ -61,7 +61,7 @@ namespace library_core_tests
             });
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void Soap11Wss10Failed(X509Certificate2 cert)
         {
@@ -87,7 +87,7 @@ namespace library_core_tests
             Assert.Throws<ProtocolException>(() => client.Echo("boe"));
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void Soap11Wss10(X509Certificate2 cert)
         {
@@ -116,7 +116,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void Soap11Wss11(X509Certificate2 cert)
         {
@@ -145,7 +145,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void Soap12Wss10(X509Certificate2 cert)
         {
@@ -172,7 +172,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void Soap12Wss11(X509Certificate2 cert)
         {
@@ -200,7 +200,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void Soap11Wss10SignAll(X509Certificate2 cert)
         {
@@ -229,7 +229,7 @@ namespace library_core_tests
             Assert.Equal("boe", pong);
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void EhealthX509(X509Certificate2 cert)
         {

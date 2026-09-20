@@ -132,7 +132,7 @@ namespace library_core_tests
             Assert.True(signed.CheckSignature(issuer, true));
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void WsTrustWithExplicitSession(X509Certificate2 cert)
         {
@@ -148,7 +148,7 @@ namespace library_core_tests
             Verify();
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void WsTrustNoExplicitSession(X509Certificate2 cert)
         {
@@ -165,7 +165,7 @@ namespace library_core_tests
         }
 
 
-        [Theory(Skip = "Doesn't support EC cert and that is the only one I currently have")]
+        [IntegrationTheory(Skip = "Doesn't support EC cert and that is the only one I currently have")]
         [MemberData(nameof(GetCerts))]
         public void StsSaml11(X509Certificate2 cert)
         {
@@ -178,7 +178,7 @@ namespace library_core_tests
             Verify();
         }
 
-        [Theory]
+        [IntegrationTheory]
         [MemberData(nameof(GetCerts))]
         public void EhealthSaml11(X509Certificate2 cert)
         {

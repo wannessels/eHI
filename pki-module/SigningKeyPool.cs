@@ -38,7 +38,12 @@ namespace Egelke.EHealth.Client.Pki
             switch (key)
             {
                 case RSA rsa: { var copy = RSA.Create(); try { copy.ImportParameters(rsa.ExportParameters(true)); return copy; } catch { copy.Dispose(); throw; } }
-                case ECDsa ec: { var copy = ECDsa.Create(); try { copy.ImportParameters(ec.ExportParameters(true)); return copy; } catch { copy.Dispose(); throw; } }
+                case ECDsa ec:
+#if LEGACY_RUNTIME
+                    throw new CryptographicException("This runtime retains the original ECDSA provider handle");
+#else
+                    { var copy = ECDsa.Create(); try { copy.ImportParameters(ec.ExportParameters(true)); return copy; } catch { copy.Dispose(); throw; } }
+#endif
                 default: throw new CryptographicException("RSA or ECDSA signing keys are required");
             }
         }
@@ -58,7 +63,7 @@ namespace Egelke.EHealth.Client.Pki
         }
         private Lease Acquire(long started)
         {
-            EHealthMetrics.SigningQueueDuration.Record(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            EHealthMetrics.SigningQueueDuration.Record(RuntimeCompat.GetElapsedTime(started).TotalMilliseconds);
             if (idle.TryTake(out var key)) return new Lease(this, key);
             try { key = open(); }
             catch { slots.Release(); throw; }

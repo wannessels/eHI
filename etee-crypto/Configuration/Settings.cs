@@ -19,6 +19,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Egelke.EHealth.Client.Pki;
@@ -56,9 +57,9 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         /// </summary>
         /// <value>
         /// <para>
-        /// Defaults to <see cref="long.MaxValue"/>: nothing spills and no temporary file is created. Set a finite
-        /// size at application startup to use temporary files above it, for example
-        /// <c>Settings.Default.InMemorySize = 64L * 1024 * 1024;</c> to spill streams above 64 MiB.
+        /// Defaults to 16 MiB per stream. Larger streams spill to temporary files.
+        /// Configure at application startup; for example, <c>Settings.Default.InMemorySize = 64L * 1024 * 1024;</c>
+        /// raises the threshold to 64 MiB. Setting <see cref="long.MaxValue"/> explicitly disables spilling.
         /// </para>
         /// <para>
         /// This is a per-stream threshold, not a cap on total process memory; the metrics
@@ -72,6 +73,14 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         /// Defaults to the processor count. Set 1 for keys that cannot be used concurrently, such as smart cards. Same value as <see cref="SigningKeyPool.DefaultLimit"/>.
         /// </summary>
         public int SigningKeyHandles { get => SigningKeyPool.DefaultLimit; set => SigningKeyPool.DefaultLimit = value; }
+
+        private volatile RSASignaturePadding rsaSignaturePadding = RSASignaturePadding.Pss;
+        /// <summary>RSA CMS signing padding, captured by each new sealer. Defaults to PSS; explicitly select PKCS#1 for providers that cannot perform PSS. Does not affect ECDSA or SOAP signing.</summary>
+        public RSASignaturePadding RsaSignaturePadding
+        {
+            get => rsaSignaturePadding;
+            set => rsaSignaturePadding = value ?? throw new ArgumentNullException(nameof(value));
+        }
 
         /// <summary>
         /// Maximum bytes of freed spool memory kept in the pool for reuse. Defaults to 256 MiB and is read when the pool is first used, so set it at startup.
@@ -111,7 +120,7 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         private Settings()
         {
             TimestampGracePeriod = new TimeSpan(0, 5, 0);
-            InMemorySize = long.MaxValue;
+            InMemorySize = 16L * 1024 * 1024;
             SpoolPoolBytes = 256L * 1024 * 1024;
             SignRetries = Environment.OSVersion.Platform == PlatformID.Win32NT ? 4 : 0;
         }

@@ -12,7 +12,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
 {
     // BER allows the signature and other small metadata to follow the payload.
     // Only the final result is spooled; nested writers feed hashing/encryption directly.
-    internal sealed class BerOctetWriter : Stream
+    internal sealed class BerOctetWriter : RuntimeStream
     {
         private readonly Stream output;
         private byte[] buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
@@ -80,7 +80,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
         public override int Read(byte[] b, int o, int c) => throw new NotSupportedException(); public override long Seek(long o, SeekOrigin s) => throw new NotSupportedException(); public override void SetLength(long n) => throw new NotSupportedException();
     }
 
-    internal sealed class NativeSigningWriter : Stream
+    internal sealed class NativeSigningWriter : RuntimeStream
     {
         private readonly Stream output;
         private readonly IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);

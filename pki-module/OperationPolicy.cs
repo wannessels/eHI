@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -96,7 +97,7 @@ namespace Egelke.EHealth.Client.Pki
             get => Volatile.Read(ref defaultPolicy);
             set
             {
-                ArgumentNullException.ThrowIfNull(value);
+                RuntimeCompat.ThrowIfNull(value, nameof(value));
                 Volatile.Write(ref defaultPolicy, value);
             }
         }
@@ -128,7 +129,7 @@ namespace Egelke.EHealth.Client.Pki
                     if (!nested)
                     {
                         await admission.WaitAsync(token).ConfigureAwait(false);
-                        EHealthMetrics.QueueDuration.Record(Stopwatch.GetElapsedTime(started).TotalMilliseconds, new TagList { { "operation", name } });
+                        EHealthMetrics.QueueDuration.Record(RuntimeCompat.GetElapsedTime(started).TotalMilliseconds, new TagList { { "operation", name } });
                         EHealthMetrics.ActiveOperations.Add(1, new TagList { { "operation", name } });
                     }
                     scope.MarkAdmitted();

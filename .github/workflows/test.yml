@@ -1,0 +1,93 @@
+name: Build and test supported runtimes
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build every target and configuration
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet restore ehi.sln --source https://api.nuget.org/v3/index.json
+      - run: dotnet build ehi.sln -c Debug --no-restore -p:SignAssembly=false
+      - run: dotnet build ehi.sln -c Release --no-restore -p:SignAssembly=false
+      - run: dotnet build benchmarks/benchmarks.csproj -c Release -p:SignAssembly=false --source https://api.nuget.org/v3/index.json
+
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.framework }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, framework: net462 }
+          - { os: windows-2022, framework: net472 }
+          - { os: windows-2022, framework: net481 }
+          - { os: windows-2022, framework: net6.0 }
+          - { os: windows-2022, framework: net8.0 }
+          - { os: ubuntu-22.04, framework: net6.0 }
+          - { os: ubuntu-22.04, framework: net8.0 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      EHI_RUN_INTEGRATION: '0'
+      EHI_RUN_HARDWARE_TESTS: '0'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: |
+            6.0.x
+            8.0.x
+      - name: Run all self-contained test projects
+        shell: pwsh
+        run: ./eng/test.ps1 -Framework '${{ matrix.framework }}'
+      - name: Retain results, including explicit integration skips
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tests-${{ matrix.os }}-${{ matrix.framework }}
+          path: artifacts/test-results
+          if-no-files-found: warn
+
+  standard:
+    name: .NET Standard packages / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 8.0.x
+      - name: Pack only .NET Standard assets and test a consuming application
+        shell: pwsh
+        run: ./eng/test-standard.ps1
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: standard-${{ matrix.os }}
+          path: artifacts/test-results
+          if-no-files-found: warn

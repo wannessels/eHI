@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net462;net472;net481;net6.0;net8.0</TargetFrameworks>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../services/services.csproj" Condition="'$(UseStandardPackages)' != 'true'" />
+    <PackageReference Include="Egelke.EHealth.Client.Services" Version="$(StandardLibraryVersion)" Condition="'$(UseStandardPackages)' == 'true'" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.1" />
+    <Compile Include="../performance-tests/PkiFixture.cs" Link="PkiFixture.cs" />
+    <Compile Include="../performance-tests/ChainCacheTests.cs" Link="ChainCacheTests.cs" />
+    <Compile Include="../performance-tests/RevocationTests.cs" Link="RevocationTests.cs" />
+    <Compile Include="../performance-tests/NativeEtkTests.cs" Link="NativeEtkTests.cs" />
+    <Compile Include="../performance-tests/SecurityRegressionTests.cs" Link="SecurityRegressionTests.cs" />
+    <Compile Include="../performance-tests/RsaPaddingTests.cs" Link="RsaPaddingTests.cs" />
+    <Compile Include="../performance-tests/NativePkiInteroperabilityTests.cs" Link="NativePkiInteroperabilityTests.cs" />
+    <Compile Include="../performance-tests/WsSecuritySigningTests.cs" Link="WsSecuritySigningTests.cs" />
+    <Content Include="../pki-test/EHealthP12/dummy.p12" Link="fixtures/dummy.p12" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../pki-test/files/fedictTs.ts" Link="fixtures/fedictTs.ts" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup Condition="$(TargetFramework.StartsWith('net4'))">
+    <Reference Include="System.ServiceModel" />
+    <Reference Include="System.IdentityModel" />
+    <Reference Include="System.Security" />
+  </ItemGroup>
+</Project>

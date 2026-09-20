@@ -22,18 +22,20 @@ namespace Egelke.EHealth.Etee.Crypto
         protected readonly Level level;
         protected readonly WebKey ownWebKey;
         protected readonly X509Certificate2 authentication, signature;
+        protected readonly RSASignaturePadding rsaSignaturePadding;
         private readonly ITimestampProvider timestampProvider;
         private readonly X509Certificate2Collection extraStore;
         private readonly ILogger<TripleWrapper> logger;
         private readonly ConcurrentDictionary<X509Certificate2, SigningKeyPool> keys = new();
         private readonly Lazy<SigningKeyPool> webKeyPool;
         protected int disposed;
-        internal TripleWrapper(Level level, WebKey ownWebKey, ITimestampProvider timestampProvider, ILogger<TripleWrapper> logger = null)
-            : this(level, null, null, timestampProvider, null, logger) { this.ownWebKey = ownWebKey; }
-        internal TripleWrapper(Level level, X509Certificate2 authentication, X509Certificate2 signature, ITimestampProvider timestampProvider, X509Certificate2Collection extraStore, ILogger<TripleWrapper> logger = null)
+        internal TripleWrapper(Level level, WebKey ownWebKey, ITimestampProvider timestampProvider, ILogger<TripleWrapper> logger = null, RSASignaturePadding rsaSignaturePadding = null)
+            : this(level, null, null, timestampProvider, null, logger, rsaSignaturePadding) { this.ownWebKey = ownWebKey; }
+        internal TripleWrapper(Level level, X509Certificate2 authentication, X509Certificate2 signature, ITimestampProvider timestampProvider, X509Certificate2Collection extraStore, ILogger<TripleWrapper> logger = null, RSASignaturePadding rsaSignaturePadding = null)
         {
             if (level == Level.L_Level || level == Level.A_level) throw new ArgumentException("Invalid sealing level", nameof(level));
             this.level = level; this.authentication = authentication; this.signature = signature ?? authentication;
+            this.rsaSignaturePadding = rsaSignaturePadding ?? Settings.Default.RsaSignaturePadding;
             this.timestampProvider = timestampProvider; this.extraStore = extraStore; this.logger = logger;
             webKeyPool = new Lazy<SigningKeyPool>(() => SigningKeyPool.ForWebKey(this.ownWebKey.NativeKey, Settings.Default.SigningKeyHandles));
         }
@@ -46,7 +48,7 @@ namespace Egelke.EHealth.Etee.Crypto
         }
         private SigningKeyPool Pool(X509Certificate2 cert)
         {
-            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            RuntimeCompat.ThrowIfDisposed(disposed != 0, this);
             if (cert == null) return webKeyPool.Value;
             return keys.GetOrAdd(cert, value => new SigningKeyPool(() =>
                 (AsymmetricAlgorithm)value.GetRSAPrivateKey() ?? value.GetECDsaPrivateKey() ?? throw new CryptographicException("A native RSA or ECDSA private key is required"), Settings.Default.SigningKeyHandles));
@@ -64,7 +66,7 @@ namespace Egelke.EHealth.Etee.Crypto
             => OperationPolicy.Default.RunAsync("seal", _ => SealCoreAsync(input, key, recipients?.Select(t => t.ToCertificate()).ToArray(), webKeys));
         protected virtual async Task<Stream> SealCoreAsync(Stream input, SecretKey key, X509Certificate2[] recipients, WebKey[] webKeys)
         {
-            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            RuntimeCompat.ThrowIfDisposed(disposed != 0, this);
             if (signature == null && ownWebKey == null) throw new InvalidOperationException("A signing certificate or WebKey is required");
             var result = new CryptoSpool(CryptoSpool.Remaining(input));
             try
@@ -96,7 +98,7 @@ namespace Egelke.EHealth.Etee.Crypto
         private async Task<SignedCms> SignDigestAsync(byte[] digest, X509Certificate2 certificate)
         {
             using var lease = await Pool(certificate).RentAsync(OperationScope.Cancellation).ConfigureAwait(false);
-            return NativeStreamingCms.SignDigest(digest, certificate, lease.Key, ownWebKey?.Id);
+            return NativeStreamingCms.SignDigest(digest, certificate, lease.Key, ownWebKey?.Id, rsaSignaturePadding);
         }
         public Stream Complete(Stream data) => CompleteAsync(data).GetAwaiter().GetResult();
         public Stream Complete(Stream data, out TimemarkKey key)
@@ -106,7 +108,7 @@ namespace Egelke.EHealth.Etee.Crypto
         private Task<TimemarkedResult<Stream>> CompleteWithKeyAsync(Stream data) => OperationPolicy.Default.RunAsync("complete", _ => CompleteMessageAsync(data));
         protected virtual async Task<TimemarkedResult<Stream>> CompleteMessageAsync(Stream data)
         {
-            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            RuntimeCompat.ThrowIfDisposed(disposed != 0, this);
             using var content = new CryptoSpool(CryptoSpool.Remaining(data));
             var detached = await NativeStreamingCms.ReadAsync(data, content).ConfigureAwait(false);
             var key = await CompleteCoreAsync(detached.Metadata, null, level, detached.Certificates).ConfigureAwait(false);
@@ -141,7 +143,7 @@ namespace Egelke.EHealth.Etee.Crypto
             }
             if (timestamp == null && (requested & Level.T_Level) == Level.T_Level && timestampProvider != null)
             {
-                byte[] hash = SHA256.HashData(key.SignatureValue);
+                byte[] hash = CryptoEncoding.Hash(CryptoEncoding.Sha256, key.SignatureValue);
                 byte[] bytes = timestampProvider is ITimestampProviderAsync asyncProvider
                     ? await asyncProvider.GetTimestampFromDocumentHashAsync(hash, "http://www.w3.org/2001/04/xmlenc#sha256").ConfigureAwait(false)
                     : timestampProvider.GetTimestampFromDocumentHash(hash, "http://www.w3.org/2001/04/xmlenc#sha256");

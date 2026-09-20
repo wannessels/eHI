@@ -45,7 +45,7 @@ namespace etee_crypto_tests
             //clearStream = new MemoryStream(Encoding.UTF8.GetBytes(clearMessage));
         }
 
-        [Fact]
+        [IntegrationFact]
         public void LevelBFromDotNetToJava()
         {
             IDataSealer target = factory.Create(Level.B_Level, sender);

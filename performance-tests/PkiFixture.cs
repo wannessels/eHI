@@ -23,12 +23,22 @@ using BCert = Org.BouncyCastle.X509.X509Certificate;
 
 internal class PkiFixture
 {
-    internal static AsymmetricCipherKeyPair NewKey() { using var rsa = RSA.Create(2048); return DotNetUtilities.GetRsaKeyPair(rsa); }
-    internal static BCert MakeCert(string name, BigInteger serial, AsymmetricCipherKeyPair key, BCert issuer, AsymmetricCipherKeyPair issuerKey, string ocsp = null, string crl = null, bool timestamp = false, int? keyUsage = null, DateTime? notAfter = null)
+    internal static AsymmetricCipherKeyPair NewKey() { using var rsa = RuntimeCompat.CreateRsa(2048); return DotNetUtilities.GetRsaKeyPair(rsa); }
+    internal static X509Certificate2 WithKey(BCert certificate, AsymmetricCipherKeyPair key)
+    {
+        var store = new Org.BouncyCastle.Pkcs.Pkcs12StoreBuilder().Build();
+        store.SetKeyEntry("authentication", new Org.BouncyCastle.Pkcs.AsymmetricKeyEntry(key.Private), new[] { new Org.BouncyCastle.Pkcs.X509CertificateEntry(certificate) });
+        using var bytes = new MemoryStream(); store.Save(bytes, "fixture".ToCharArray(), new SecureRandom());
+        var imported = X509CertificateLoader.LoadPkcs12Collection(bytes.ToArray(), "fixture", X509KeyStorageFlags.Exportable);
+        var selected = imported.Cast<X509Certificate2>().Single(c => c.HasPrivateKey);
+        foreach (var other in imported) if (!ReferenceEquals(other, selected)) other.Dispose();
+        return selected;
+    }
+    internal static BCert MakeCert(string name, BigInteger serial, AsymmetricCipherKeyPair key, BCert issuer, AsymmetricCipherKeyPair issuerKey, string ocsp = null, string crl = null, bool timestamp = false, int? keyUsage = null, DateTime? notAfter = null, DateTime? notBefore = null)
     {
         var gen = new X509V3CertificateGenerator();
         gen.SetSerialNumber(serial); gen.SetIssuerDN(issuer?.SubjectDN ?? new X509Name(name)); gen.SetSubjectDN(new X509Name(name));
-        gen.SetNotBefore(DateTime.UtcNow.AddDays(-1)); gen.SetNotAfter(notAfter ?? DateTime.UtcNow.AddDays(2)); gen.SetPublicKey(key.Public);
+        gen.SetNotBefore(notBefore ?? DateTime.UtcNow.AddDays(-1)); gen.SetNotAfter(notAfter ?? DateTime.UtcNow.AddDays(2)); gen.SetPublicKey(key.Public);
         gen.AddExtension(X509Extensions.BasicConstraints, true, new BasicConstraints(issuer == null));
         gen.AddExtension(X509Extensions.KeyUsage, true, new KeyUsage(keyUsage ?? (issuer == null ? KeyUsage.KeyCertSign | KeyUsage.CrlSign : KeyUsage.DigitalSignature)));
         if (timestamp) gen.AddExtension(X509Extensions.ExtendedKeyUsage, true, new ExtendedKeyUsage(KeyPurposeID.id_kp_timeStamping));
@@ -58,7 +68,7 @@ internal class PkiFixture
             using (client) { using var stream = client.GetStream(); var head = new StringBuilder(); byte[] buf = new byte[1];
                 while (!head.ToString().EndsWith("\r\n\r\n")) { if (await stream.ReadAsync(buf) == 0) return; head.Append((char)buf[0]); }
                 int contentLength = 0;
-                foreach (var line in head.ToString().Split("\r\n")) if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) contentLength = int.Parse(line.Substring(15).Trim());
+                foreach (var line in head.ToString().Split(new[] { "\r\n" }, StringSplitOptions.None)) if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) contentLength = int.Parse(line.Substring(15).Trim());
                 while (contentLength-- > 0) if (await stream.ReadAsync(buf) == 0) return;
                 bool ocsp = head.ToString().StartsWith("POST /ocsp");
                 if (ocsp) System.Threading.Interlocked.Increment(ref OcspRequests); else System.Threading.Interlocked.Increment(ref CrlRequests); if (DelayMilliseconds > 0) await Task.Delay(DelayMilliseconds);

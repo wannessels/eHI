@@ -11,7 +11,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
 {
     // Every stage can grow independently; encrypted/CMS overhead and unknown input
     // lengths must not allow a stage to silently exceed the memory threshold.
-    internal sealed class CryptoSpool : Stream
+    internal sealed class CryptoSpool : RuntimeStream
     {
         private static readonly RecyclableMemoryStreamManager pool = CreatePool();
         private Stream storage;

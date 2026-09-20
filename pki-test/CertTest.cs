@@ -1,7 +1,11 @@
 using CertificateList = Egelke.EHealth.Client.Pki.CertificateRevocationList;
 using BasicOcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
 using OcspResponse = Egelke.EHealth.Client.Pki.OcspResponse;
+#if LEGACY_RUNTIME
+using TimeStampToken = Egelke.EHealth.Client.Pki.Compatibility.PortableTimestampToken;
+#else
 using TimeStampToken = System.Security.Cryptography.Pkcs.Rfc3161TimestampToken;
+#endif
 
 
 using System;
@@ -45,7 +49,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             }
         }
 
-        [Fact]
+        [IntegrationFact]
         public void TestOldEid_ForgetExtra()
         {
             X509Certificate2 target = new X509Certificate2(@"files/eid79021802145.crt");
@@ -57,7 +61,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Equal(1, rsp.ChainElements.Count);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void TestOldEid_NoRevocation()
         {
             X509Certificate2 target = new X509Certificate2(@"files/eid79021802145.crt");
@@ -75,7 +79,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Equal("CN=Belgium Root CA2, C=BE", rsp.ChainElements[2].Certificate.Subject);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void TestOldEid_FailToGetRevocation()
         {
             X509Certificate2 target = new X509Certificate2(@"files/eid79021802145.crt");
@@ -95,7 +99,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Equal("CN=Belgium Root CA2, C=BE", rsp.ChainElements[2].Certificate.Subject);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void TestOldEid_WithHistoricalRevocation()
         {
             X509Certificate2 target = new X509Certificate2(@"files/eid79021802145.crt");
@@ -123,7 +127,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Equal(1, ocsps.Count);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void TestNewEid_GetRevocation()
         {
             X509Certificate2 target = new X509Certificate2(@"files/eid79021802145-2027.crt");
@@ -145,7 +149,7 @@ namespace Egelke.EHealth.Client.Pki.Test
             Assert.Equal(1, ocsps.Count);
         }
 
-        [Fact]
+        [IntegrationFact]
         public async Task TestNewEid_GetRevocationAsync()
         {
             X509Certificate2 target = new X509Certificate2(@"files/eid79021802145-2027.crt");

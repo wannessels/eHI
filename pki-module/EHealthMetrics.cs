@@ -59,7 +59,7 @@ namespace Egelke.EHealth.Client.Pki
         /// <summary>Counts one completion and records its duration since <paramref name="started"/> (a Stopwatch timestamp).</summary>
         public static void Record(Counter<long> count, Histogram<double> duration, long started, in TagList tags)
         {
-            count.Add(1, tags); duration.Record(Stopwatch.GetElapsedTime(started).TotalMilliseconds, tags);
+            count.Add(1, tags); duration.Record(RuntimeCompat.GetElapsedTime(started).TotalMilliseconds, tags);
         }
     }
 }

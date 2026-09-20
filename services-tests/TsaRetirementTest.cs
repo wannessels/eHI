@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -26,7 +26,7 @@ namespace services_tests
             target.Endpoint.EndpointBehaviors.Add(new LoggingEndpointBehavior(loggerFactory.CreateLogger<LoggingMessageInspector>()));
         }
 
-        [Fact]
+        [IntegrationFact]
         public void Sha256UsingProvider()
         {
             string msg = "Hello Bob, this is Alice";

@@ -123,7 +123,7 @@ namespace Egelke.EHealth.Client.Pki
             while (names.HasData)
             {
                 if (names.PeekTag().HasSameClassAndValue(CryptoEncoding.Context(6, false))) result.Add(names.ReadCharacterString(UniversalTagNumber.IA5String, CryptoEncoding.Context(6, false)));
-                else result.Add("der:" + Convert.ToHexString(names.ReadEncodedValue().Span));
+                else result.Add("der:" + RuntimeCompat.ToHexString(names.ReadEncodedValue().Span));
             }
             return result;
         }
@@ -183,7 +183,7 @@ namespace Egelke.EHealth.Client.Pki
             {
                 var response = responses.ReadSequence(); var id = response.ReadSequence();
                 var status = new CertificateStatus { HashOid = CryptoEncoding.ReadAlgorithm(id).Oid, IssuerNameHash = id.ReadOctetString(), IssuerKeyHash = id.ReadOctetString(), Serial = CryptoEncoding.ReadSerial(id) };
-                if (!identities.Add(status.HashOid + "|" + Convert.ToHexString(status.IssuerNameHash) + "|" + Convert.ToHexString(status.IssuerKeyHash) + "|" + status.Serial)) throw new CryptographicException("Duplicate OCSP certificate status");
+                if (!identities.Add(status.HashOid + "|" + RuntimeCompat.ToHexString(status.IssuerNameHash) + "|" + RuntimeCompat.ToHexString(status.IssuerKeyHash) + "|" + status.Serial)) throw new CryptographicException("Duplicate OCSP certificate status");
                 id.ThrowIfNotEmpty(); status.Status = response.PeekTag().TagValue;
                 if (status.Status == 1)
                 {
@@ -232,7 +232,7 @@ namespace Egelke.EHealth.Client.Pki
                 candidates.AddRange(certificates.Select(c => new X509Certificate2(c)));
                 foreach (var candidate in candidates)
                 {
-                    bool matches = responderName != null ? CryptoEncoding.NamesEqual(responderName, candidate.SubjectName.RawData) : CryptographicOperations.FixedTimeEquals(responderKeyHash, SHA1.HashData(candidate.PublicKey.EncodedKeyValue.RawData));
+                    bool matches = responderName != null ? CryptoEncoding.NamesEqual(responderName, candidate.SubjectName.RawData) : CryptographicOperations.FixedTimeEquals(responderKeyHash, CryptoEncoding.Hash(CryptoEncoding.Sha1, candidate.PublicKey.EncodedKeyValue.RawData));
                     if (!matches) continue;
                     bool directIssuer = candidate.RawData.AsSpan().SequenceEqual(issuer.RawData);
                     if (!directIssuer && (!CryptoEncoding.NamesEqual(candidate.IssuerName.RawData, issuer.SubjectName.RawData) || !CryptoEncoding.VerifyCertificate(candidate, issuer) || !CryptoEncoding.HasPurpose(candidate, "1.3.6.1.5.5.7.3.9"))) continue;

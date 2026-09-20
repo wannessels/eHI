@@ -118,7 +118,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             Leave(); if (!header.Length.HasValue) { Charge(2); output.WriteByte(0); output.WriteByte(0); }
         }
         internal OctetStream OpenOctets(int primitiveTag = 0x04) => new(this, primitiveTag);
-        internal sealed class OctetStream : Stream
+        internal sealed class OctetStream : RuntimeStream
         {
             private readonly BerStreamReader reader;
             private long remaining;

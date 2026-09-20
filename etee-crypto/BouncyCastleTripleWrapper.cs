@@ -18,15 +18,15 @@ namespace Egelke.EHealth.Etee.Crypto
     internal sealed class BouncyCastleTripleWrapper : TripleWrapper
     {
         private readonly BouncyCms.Keys bouncyKeys = new();
-        internal BouncyCastleTripleWrapper(Level level, WebKey key, ITimestampProvider timestamps, ILogger<TripleWrapper> logger)
-            : base(level, key, timestamps, logger) { }
-        internal BouncyCastleTripleWrapper(Level level, X509Certificate2 authentication, X509Certificate2 signature, ITimestampProvider timestamps, X509Certificate2Collection extra, ILogger<TripleWrapper> logger)
-            : base(level, authentication, signature, timestamps, extra, logger) { }
+        internal BouncyCastleTripleWrapper(Level level, WebKey key, ITimestampProvider timestamps, ILogger<TripleWrapper> logger, RSASignaturePadding rsaSignaturePadding = null)
+            : base(level, key, timestamps, logger, rsaSignaturePadding) { }
+        internal BouncyCastleTripleWrapper(Level level, X509Certificate2 authentication, X509Certificate2 signature, ITimestampProvider timestamps, X509Certificate2Collection extra, ILogger<TripleWrapper> logger, RSASignaturePadding rsaSignaturePadding = null)
+            : base(level, authentication, signature, timestamps, extra, logger, rsaSignaturePadding) { }
         public override void Dispose() { base.Dispose(); bouncyKeys.Clear(); }
 
         protected override async Task<Stream> SealCoreAsync(Stream input, SecretKey key, X509Certificate2[] recipients, WebKey[] webKeys)
         {
-            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            RuntimeCompat.ThrowIfDisposed(disposed != 0, this);
             if (signature == null && ownWebKey == null) throw new InvalidOperationException("A signing certificate or WebKey is required");
             using var source = new BouncyCms.Input(input);
             var streams = BouncyCms.Streams(source.Stream);
@@ -54,7 +54,7 @@ namespace Egelke.EHealth.Etee.Crypto
         {
             OperationScope.Cancellation.ThrowIfCancellationRequested();
             var privateKey = certificate == null ? bouncyKeys.Get(ownWebKey) : bouncyKeys.Get(certificate);
-            string algorithm = privateKey is RsaKeyParameters ? "SHA256WITHRSAANDMGF1" : privateKey is ECPrivateKeyParameters
+            string algorithm = privateKey is RsaKeyParameters ? (rsaSignaturePadding == RSASignaturePadding.Pkcs1 ? "SHA256WITHRSA" : "SHA256WITHRSAANDMGF1") : privateKey is ECPrivateKeyParameters
                 ? "SHA256WITHECDSA" : throw new NotSupportedException("RSA or ECDSA signing keys are required");
             var factory = new Asn1SignatureFactory(algorithm, privateKey);
             var builder = new SignerInfoGeneratorBuilder();
@@ -87,7 +87,7 @@ namespace Egelke.EHealth.Etee.Crypto
 
         protected override async Task<TimemarkedResult<Stream>> CompleteMessageAsync(Stream data)
         {
-            ObjectDisposedException.ThrowIf(disposed != 0, this);
+            RuntimeCompat.ThrowIfDisposed(disposed != 0, this);
             using var source = new BouncyCms.Input(data);
             BouncyCms.ValidateFrame(source.Stream);
             var streams = BouncyCms.Streams(source.Stream);

@@ -43,7 +43,7 @@ public class NativeStreamingTests
                     Assert.Equal(size, result.UnsealedData.Length);
                     Assert.Equal(ValidationStatus.Valid, result.SecurityInformation.ValidationStatus);
                     using var expected = new GeneratedStream(size);
-                    Assert.Equal(SHA256.HashData(expected), SHA256.HashData(result.UnsealedData));
+                    Assert.Equal(RuntimeCompat.HashStream(expected), RuntimeCompat.HashStream(result.UnsealedData));
                 }
                 Assert.True(input.CanRead); Assert.True(encrypted.CanRead);
             }
@@ -184,7 +184,7 @@ public class NativeStreamingTests
         public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
         public override int Read(Span<byte> buffer)
         {
-            ObjectDisposedException.ThrowIf(disposed, this);
+            RuntimeCompat.ThrowIfDisposed(disposed, this);
             int count = (int)Math.Min(buffer.Length, length - BytesRead);
             for (int i = 0; i < count; i++) buffer[i] = (byte)((BytesRead + i) % 251);
             BytesRead += count;

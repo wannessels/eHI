@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -28,7 +28,7 @@ namespace services_tests
 
 
 
-        [Fact]
+        [IntegrationFact]
         public void GetPrivateEtk()
         {
             var req = new IdentifierType()
@@ -46,7 +46,7 @@ namespace services_tests
             //File.WriteAllBytes("c:/Data/79021802145.etk", rsp[0].GetEncoded());
         }
 
-        [Fact]
+        [IntegrationFact]
         public void GetCinMyCarenetRsaEtk()
         {
             var req = new IdentifierType()
@@ -64,7 +64,7 @@ namespace services_tests
             //File.WriteAllBytes("c:/Data/mycarenet.etk", rsp[0].GetEncoded());
         }
 
-        [Fact]
+        [IntegrationFact]
         public void GetCinMyCarenetEcEtk()
         {
             var req = new IdentifierType()
@@ -82,7 +82,7 @@ namespace services_tests
             //File.WriteAllBytes("c:/Data/mycarenet-ec.etk", rsp[0].GetEncoded());
         }
 
-        [Fact]
+        [IntegrationFact]
         public void NotFound()
         {
             var req = new IdentifierType()
@@ -96,7 +96,7 @@ namespace services_tests
             Assert.Equal("NO_MATCHING_ETK", ex.Code);
         }
 
-        [Fact]
+        [IntegrationFact]
         public void MultipleFound()
         {
             var req = new IdentifierType()

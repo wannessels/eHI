@@ -20,7 +20,7 @@ namespace Egelke.EHealth.Client.Pki
         {
             string key = certificate.Thumbprint;
             if (entries.TryGetValue(key, out var cached)) return cached;
-            var created = (AsymmetricAlgorithm)certificate.GetRSAPublicKey() ?? certificate.GetECDsaPublicKey() ?? (AsymmetricAlgorithm)certificate.GetDSAPublicKey();
+            var created = (AsymmetricAlgorithm)certificate.GetRSAPublicKey() ?? certificate.GetECDsaPublicKey() ?? (AsymmetricAlgorithm)RuntimeCompat.GetDsaPublicKey(certificate);
             if (created == null) return null;
             if (entries.Count >= EntryLimit) entries.Clear();
             cached = entries.GetOrAdd(key, created);

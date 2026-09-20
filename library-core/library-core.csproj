@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFrameworks>net462;netstandard2.0;net6.0;net8.0</TargetFrameworks>
     <RootNamespace>Egelke.EHealth.Client</RootNamespace>
     <AssemblyName>Egelke.EHealth.Client</AssemblyName>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
@@ -48,6 +48,13 @@
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.12" />
     <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.12" />
-    <PackageReference Include="System.ServiceModel.Http" Version="8.1.2" />
+    <PackageReference Include="System.ServiceModel.Http" Version="8.1.2" Condition="'$(TargetFramework)' == 'net8.0'" />
+    <PackageReference Include="System.ServiceModel.Http" Version="6.2.0" Condition="'$(TargetFramework)' == 'net6.0'" />
+    <PackageReference Include="System.ServiceModel.Http" Version="4.10.3" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
+    <PackageReference Include="System.ServiceModel.Security" Version="4.10.3" Condition="'$(TargetFramework)' == 'netstandard2.0'" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)' == 'net462'">
+    <Reference Include="System.ServiceModel" />
+    <Reference Include="System.IdentityModel" />
   </ItemGroup>
 </Project>

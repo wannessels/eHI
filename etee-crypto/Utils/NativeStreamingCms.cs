@@ -16,7 +16,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
     internal static class NativeStreamingCms
     {
         private const string MessageDigest = "1.2.840.113549.1.9.4", ContentType = "1.2.840.113549.1.9.3";
-        internal static SignedCms SignDigest(byte[] digest, X509Certificate2 certificate, AsymmetricAlgorithm key, byte[] id)
+        internal static SignedCms SignDigest(byte[] digest, X509Certificate2 certificate, AsymmetricAlgorithm key, byte[] id, RSASignaturePadding rsaPadding)
         {
             var attributes = new AsnWriter(AsnEncodingRules.DER);
             using (attributes.PushSetOf())
@@ -31,8 +31,8 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             {
                 signature = key switch
                 {
-                    RSA rsa => rsa.SignHash(SHA256.HashData(signedAttributes), HashAlgorithmName.SHA256, RSASignaturePadding.Pss),
-                    ECDsa ec => ec.SignHash(SHA256.HashData(signedAttributes), DSASignatureFormat.Rfc3279DerSequence),
+                    RSA rsa => rsa.SignHash(CryptoEncoding.Hash(CryptoEncoding.Sha256, signedAttributes), HashAlgorithmName.SHA256, rsaPadding),
+                    ECDsa ec => RuntimeCompat.SignEcHash(ec, CryptoEncoding.Hash(CryptoEncoding.Sha256, signedAttributes)),
                     _ => throw new NotSupportedException("RSA or ECDSA signing keys are required")
                 };
             }
@@ -53,7 +53,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                         else using (writer.PushSequence()) { writer.WriteEncodedValue(certificate.IssuerName.RawData); writer.WriteIntegerUnsigned(CryptoEncoding.Serial(certificate)); }
                         CryptoEncoding.WriteAlgorithm(writer, CryptoEncoding.Sha256);
                         writer.WriteEncodedValue(signedAttributes);
-                        if (key is RSA)
+                        if (key is RSA && rsaPadding == RSASignaturePadding.Pss)
                         {
                             using (writer.PushSequence())
                             {
@@ -67,6 +67,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                                 }
                             }
                         }
+                        else if (key is RSA) CryptoEncoding.WriteAlgorithm(writer, CryptoEncoding.Rsa);
                         else CryptoEncoding.WriteAlgorithm(writer, "1.2.840.10045.4.3.2", false);
                         writer.WriteOctetString(signature);
                     }
@@ -159,7 +160,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 if (key is RSA rsa && algorithm.Oid.StartsWith("1.2.840.113549.1.1.", StringComparison.Ordinal))
                     return rsa.VerifyHash(digest, signature, CryptoEncoding.HashName(digestOid), algorithm.Oid == CryptoEncoding.RsaPss ? RSASignaturePadding.Pss : RSASignaturePadding.Pkcs1);
                 if (key is ECDsa ec && algorithm.Oid.StartsWith("1.2.840.10045.", StringComparison.Ordinal))
-                    return ec.VerifyHash(digest, signature, DSASignatureFormat.Rfc3279DerSequence);
+                    return RuntimeCompat.VerifyEcHash(ec, digest, signature);
                 return false;
             }
         }
@@ -207,7 +208,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             var reader = new AsnReader(encoded, AsnEncodingRules.BER);
             if (reader.ReadObjectIdentifier() != expected) throw new InvalidMessageException("Unexpected CMS content type"); reader.ThrowIfNotEmpty();
         }
-        private sealed class HashReader : Stream
+        private sealed class HashReader : RuntimeStream
         {
             private readonly Stream input; private readonly IncrementalHash[] hashes;
             internal HashReader(Stream input, IncrementalHash[] hashes) { this.input = input; this.hashes = hashes; }
