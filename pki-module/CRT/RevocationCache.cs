@@ -20,7 +20,7 @@ namespace Egelke.EHealth.Client.Pki
         private static readonly LinkedList<Entry> lru = new LinkedList<Entry>();
         private static long size;
         private static int entryLimit = 1024;
-        private static long sizeLimitBytes = 64L * 1024 * 1024;
+        private static long sizeLimitBytes = 256L * 1024 * 1024;
 
         /// <summary>Whether downloaded evidence is cached.</summary>
         public static bool Enabled { get; set; } = true;
@@ -52,7 +52,7 @@ namespace Egelke.EHealth.Client.Pki
             if (!Enabled) return;
             var parsed = response;
             var expires = parsed.Responses.Select(r => r.NextUpdate ?? parsed.ProducedAt + DefaultLifetime).Min();
-            Put(OcspKey(cert, issuer), response, expires, response.GetEncoded().LongLength * 4 + 512);
+            Put(OcspKey(cert, issuer), response, expires, response.EncodedLength * 4L + 512);
         }
         internal static bool TryGetCrl(X509Certificate2 cert, X509Certificate2 issuer, out CertificateRevocationList crl)
             => TryGet(CrlKey(cert, issuer), out crl);
@@ -60,8 +60,7 @@ namespace Egelke.EHealth.Client.Pki
         {
             if (!Enabled) return;
             var parsed = crl;
-            Put(CrlKey(cert, issuer), crl, parsed.NextUpdate ?? parsed.ThisUpdate + DefaultLifetime,
-                crl.GetEncoded().LongLength * 16 + 1024);
+            Put(CrlKey(cert, issuer), crl, parsed.NextUpdate ?? parsed.ThisUpdate + DefaultLifetime, crl.EstimatedSize);
         }
         private static string OcspKey(X509Certificate2 cert, X509Certificate2 issuer)
             => "ocsp|" + issuer.Thumbprint + "|" + cert.SerialNumber;

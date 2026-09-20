@@ -10,7 +10,8 @@ namespace Egelke.EHealth.Client.Pki
     /// <summary>An immutable DER certificate revocation list, verified with platform cryptography.</summary>
     public sealed class CertificateRevocationList
     {
-        private readonly byte[] encoded, signed, issuer, signature;
+        private readonly byte[] encoded, issuer, signature;
+        private readonly ReadOnlyMemory<byte> signed;
         private readonly (string Oid, byte[] Parameters) algorithm;
         private readonly Dictionary<string, DateTime> revoked = new Dictionary<string, DateTime>();
         private readonly Dictionary<string, (bool Critical, byte[] Value)> extensions;
@@ -20,11 +21,13 @@ namespace Egelke.EHealth.Client.Pki
         public DateTime? NextUpdate { get; }
         public byte[] GetEncoded() => (byte[])encoded.Clone();
         internal int EncodedLength => encoded.Length;
+        // The encoded list plus the parsed serial dictionary; a 350k-entry Citizen CA list is charged about 57 MiB.
+        internal long EstimatedSize => encoded.Length + revoked.Count * 128L + 1024;
         public static CertificateRevocationList Parse(byte[] value) => new CertificateRevocationList(value);
         private CertificateRevocationList(byte[] value)
         {
             encoded = (byte[])value.Clone();
-            var root = CryptoEncoding.Sequence(encoded); signed = root.ReadEncodedValue().ToArray(); algorithm = CryptoEncoding.ReadAlgorithm(root);
+            var root = CryptoEncoding.Sequence(encoded); signed = root.ReadEncodedValue(); algorithm = CryptoEncoding.ReadAlgorithm(root);
             signature = root.ReadBitString(out int unused); root.ThrowIfNotEmpty();
             if (unused != 0) throw new CryptographicException("Invalid CRL signature encoding");
             var tbs = CryptoEncoding.Sequence(signed);
@@ -91,7 +94,7 @@ namespace Egelke.EHealth.Client.Pki
             lock (sync)
             {
                 if (verifiedIssuer == authority.Thumbprint) return;
-                if (!CryptoEncoding.VerifySignature(authority, signed, algorithm.Oid, algorithm.Parameters, signature)) throw new RevocationUnknownException("Invalid CRL signature");
+                if (!CryptoEncoding.VerifySignature(authority, signed.Span, algorithm.Oid, algorithm.Parameters, signature)) throw new RevocationUnknownException("Invalid CRL signature");
                 verifiedIssuer = authority.Thumbprint;
             }
         }
