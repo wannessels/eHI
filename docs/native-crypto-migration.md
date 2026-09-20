@@ -79,4 +79,4 @@ For production dependency auditing:
 dotnet list services/services.csproj package --include-transitive
 ```
 
-See [performance configuration](performance.md), [matched .NET 8 measurements](native-crypto-performance.md), and [benchmark methodology](../benchmarks/README.md). The earlier [profiling report](performance-profiling.md) is a historical snapshot of the partial migration, not a measurement of this fully native implementation.
+See [performance configuration](performance.md), [current backend measurements](backend-crypto-performance.md), and [benchmark methodology](../benchmarks/README.md). The earlier [native migration comparison](native-crypto-performance.md) and [profiling report](performance-profiling.md) are historical snapshots.

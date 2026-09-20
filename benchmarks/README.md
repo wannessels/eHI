@@ -39,3 +39,5 @@ The default-tiering run includes noticeable first-round JIT effects. The separat
 See the [native migration guide](../docs/native-crypto-migration.md) and [the historical report](../docs/performance-profiling.md), [configuration](../docs/performance.md), and [raw results](results/).
 
 The [complete native migration report](../docs/native-crypto-performance.md) compares the final .NET 8 implementation with the previous signing-only migration on the same runtime and container limits.
+
+The [selectable backend report](../docs/backend-crypto-performance.md) compares the current native and BouncyCastle streaming modes on .NET 8. Scratch results now use the `backends-net8-1cpu-1g` filename prefix.
