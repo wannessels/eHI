@@ -2,7 +2,7 @@
 
 ## Native cryptography
 
-The libraries target .NET 8. Set `Settings.Default.UseNativeCrypto = true` for native message cryptography (the default), or `false` for BouncyCastle streaming. Native CMS favors throughput but buffers whole payloads internally; BouncyCastle streams large payloads through temporary files. The obsolete `UseNativeRsaPss` property now aliases this full message-backend switch. PKI, timestamp and revocation policy remain shared. See the [migration guide](native-crypto-migration.md) for exact scope, factory overrides and key-provider requirements.
+The libraries target .NET 8. Set `Settings.Default.UseNativeCrypto = true` for native message cryptography (the default), or `false` for BouncyCastle streaming. Native CMS favors throughput but buffers whole payloads internally; BouncyCastle streams large payloads through temporary files. The old signing-only flag has been removed. PKI, timestamp and revocation policy remain shared. See the [migration guide](native-crypto-migration.md) for exact scope, factory overrides and key-provider requirements.
 
 Dispose directly held factory-created sealers/unsealers after active operations finish, using `(instance as IDisposable)?.Dispose()`. Service clients retire and dispose their owned contexts automatically. Caller-owned certificates, stores and WebKeys must outlive active operations.
 ## Admission, cancellation and caching

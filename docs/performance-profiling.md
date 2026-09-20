@@ -19,7 +19,7 @@ Tables show the median of three round means. Allocation figures are per operatio
 
 The no-tiering control also favored native signing by approximately 9-11x. RSA-2048 signing allocations fell from approximately 32.4 KB to 1.1 KB per signature. The native implementation preserves SHA-256, MGF1/SHA-256, a 32-byte salt and trailer field 1. Tests cross-verify native/BouncyCastle signatures at 2048 and 3072 bits and validate detached CMS certificate signatures plus complete CMS round trips in both modes.
 
-Enable with `Settings.Default.UseNativeRsaPss = true`; the default remains `false`. See [flag lifetime and provider requirements](performance.md#native-rsa-pss-feature-flag).
+This historical measurement used the former signing-only feature flag, which has since been removed. Current code selects the complete message backend with `Settings.Default.UseNativeCrypto`; see [configuration](performance.md#native-cryptography).
 
 Faster signing does not translate directly into the same application speedup:
 

@@ -85,14 +85,6 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
             set => useNativeCrypto = value;
         }
 
-        /// <summary>Compatibility alias for UseNativeCrypto; now switches the complete message backend.</summary>
-        [Obsolete("Use UseNativeCrypto. This alias now selects the complete message backend, not just RSA-PSS signing.")]
-        public bool UseNativeRsaPss
-        {
-            get => UseNativeCrypto;
-            set => UseNativeCrypto = value;
-        }
-
         private Settings()
         {
             TimestampGracePeriod = new TimeSpan(0, 5, 0);

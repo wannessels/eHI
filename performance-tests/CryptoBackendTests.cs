@@ -70,12 +70,6 @@ public class CryptoBackendTests
                 Assert.Equal("BouncyCastleTripleWrapper", bouncy.GetType().Name);
                 Assert.Equal("TripleWrapper", native.GetType().Name);
                 Assert.Equal(bouncy.GetType(), pinned.GetType());
-#pragma warning disable CS0618
-                Settings.Default.UseNativeRsaPss = false;
-                Assert.False(Settings.Default.UseNativeCrypto);
-                Settings.Default.UseNativeRsaPss = true;
-                Assert.True(Settings.Default.UseNativeCrypto);
-#pragma warning restore CS0618
             }
             finally { (bouncy as IDisposable)?.Dispose(); (native as IDisposable)?.Dispose(); (pinned as IDisposable)?.Dispose(); }
         }

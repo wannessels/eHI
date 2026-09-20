@@ -40,7 +40,7 @@ This is a breaking migration: .NET Framework 4.6.2, .NET Standard 2.0 and .NET 6
 
 `ToTimeStampToken`, `IsMatch`, `Validate` and `ValidateAsync` remain extension methods in the PKI namespace. Revocation lists passed to chain/timestamp verification must use the new evidence types. `GetEncoded()` returns DER evidence suitable for CAdES attributes.
 
-`Settings.Default.UseNativeRsaPss` is an obsolete read/write alias for `UseNativeCrypto`. It now selects the **whole message backend**, rather than the earlier signing-only hybrid. New code should use `UseNativeCrypto`. Native RSA signing requires a platform key provider supporting PSS; verification retains the configured RSA-PKCS#1 and ECDSA eHealth algorithms. Native PSS uses MGF1 with the same digest and a digest-sized salt; unsupported PSS parameter combinations fail validation instead of downgrading algorithms.
+The old signing-only flag has been removed. Use `Settings.Default.UseNativeCrypto` to select the **whole message backend**. Native RSA signing requires a platform key provider supporting PSS; verification retains the configured RSA-PKCS#1 and ECDSA eHealth algorithms. Native PSS uses MGF1 with the same digest and a digest-sized salt; unsupported PSS parameter combinations fail validation instead of downgrading algorithms.
 
 PKCS#12 imports preserve named aliases, private-key associations and repeated CA-bag behavior. Password/MAC validation and import limits are provided by the platform loader. Certificates are owned by `EHealthP12`; borrowed certificates must outlive active client operations. Native decryption no longer exports private keys to construct managed key pairs.
 
