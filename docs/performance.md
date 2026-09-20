@@ -5,6 +5,8 @@
 The libraries target .NET 8. Set `Settings.Default.UseNativeCrypto = true` for native message cryptography (the default), or `false` for BouncyCastle streaming. Native CMS favors throughput but buffers whole payloads internally; BouncyCastle streams large payloads through temporary files. The old signing-only flag has been removed. PKI, timestamp and revocation policy remain shared. See the [migration guide](native-crypto-migration.md) for exact scope, factory overrides and key-provider requirements.
 
 Dispose directly held factory-created sealers/unsealers after active operations finish, using `(instance as IDisposable)?.Dispose()`. Service clients retire and dispose their owned contexts automatically. Caller-owned certificates, stores and WebKeys must outlive active operations.
+
+Native signing/completion now keeps payloads separate from metadata and writes final output directly to its stream. An isolated Linux 8 MiB round trip reduced allocation from 296 MiB to 96 MiB and process peak working set from 493 MiB to 308 MiB; see the [measurement and remaining limits](native-memory-improvements.md). Native mode still needs payload-sized buffers, so tune admission concurrency to the task's memory budget.
 ## Admission, cancellation and caching
 
 Use one shared policy for clients belonging to the same application capacity budget:

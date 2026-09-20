@@ -1,5 +1,7 @@
 # Selectable cryptography backends: .NET 8 measurements
 
+This is a snapshot from before the subsequent native allocation improvements. See the [matched native memory comparison](native-memory-improvements.md) for current results.
+
 `Settings.Default.UseNativeCrypto` selects native .NET (`true`, default) or streaming BouncyCastle (`false`). Both modes use the same current certificate, timestamp and revocation policy. See the [migration guide](native-crypto-migration.md#backend-selection) for scope, lifetime and private-key requirements.
 
 The restored BouncyCastle backend reduces large-message allocation substantially, at a CPU/latency cost. These measurements cover production commit `a6c9f94`, Release, .NET 8.0.31, Debian 12 x64, workstation GC, one CPU and 1 GiB container memory on a local AMD Ryzen 7 PRO 4750U host. They are component measurements, not AWS Fargate capacity estimates.
