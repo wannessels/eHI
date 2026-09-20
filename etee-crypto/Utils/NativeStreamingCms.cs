@@ -182,7 +182,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             }
         }
 
-        internal static async Task<Parsed> ReadAsync(Stream input, Stream content)
+        internal static Task<Parsed> ReadAsync(Stream input, Stream content) => ReadAsync(input, payload => OperationScope.CopyAsync(payload, content));
+        // The consumer reads the hashed payload as it streams; whatever it leaves unread is drained so the digests cover all content.
+        internal static async Task<Parsed> ReadAsync(Stream input, Func<Stream, Task> consume)
         {
             var reader = new BerStreamReader(input);
             reader.Enter(0x30); byte[] type = reader.ReadEncoded(); ExpectOid(type, CryptoEncoding.SignedData);
@@ -200,9 +202,9 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 }
                 reader.Enter(0x30); byte[] contentType = reader.ReadEncoded(); ExpectOid(contentType, CryptoEncoding.Data);
                 reader.Enter(0xA0);
-                using var payload = reader.OpenOctets();
-                var destination = new HashWriter(content, hashes.Values.ToArray());
-                await OperationScope.CopyAsync(payload, destination).ConfigureAwait(false);
+                using var payload = new HashReader(reader.OpenOctets(), hashes.Values.ToArray());
+                await consume(payload).ConfigureAwait(false);
+                await payload.DrainAsync().ConfigureAwait(false);
                 reader.Leave(); reader.Leave();
                 var fields = new List<DerSegments> { DerSegments.Encoded(version), DerSegments.Encoded(algorithms), DerSegments.Constructed(0x30, DerSegments.Encoded(contentType)) };
                 if (reader.HasData && reader.PeekTag() == 0xA0) fields.Add(DerSegments.Encoded(reader.ReadEncoded()));
@@ -222,18 +224,26 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             var reader = new AsnReader(encoded, AsnEncodingRules.BER);
             if (reader.ReadObjectIdentifier() != expected) throw new InvalidMessageException("Unexpected CMS content type"); reader.ThrowIfNotEmpty();
         }
-        private sealed class HashWriter : Stream
+        private sealed class HashReader : Stream
         {
-            private readonly Stream output; private readonly IncrementalHash[] hashes;
-            internal HashWriter(Stream output, IncrementalHash[] hashes) { this.output = output; this.hashes = hashes; }
-            public override void Write(byte[] buffer, int offset, int count) { foreach (var hash in hashes) hash.AppendData(buffer, offset, count); output.Write(buffer, offset, count); }
-            public override void Write(ReadOnlySpan<byte> buffer) { foreach (var hash in hashes) hash.AppendData(buffer); output.Write(buffer); }
-            public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken token = default)
-            { foreach (var hash in hashes) hash.AppendData(buffer.Span); return output.WriteAsync(buffer, token); }
-            public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken token) => WriteAsync(buffer.AsMemory(offset, count), token).AsTask();
-            public override bool CanRead => false; public override bool CanSeek => false; public override bool CanWrite => true;
+            private readonly Stream input; private readonly IncrementalHash[] hashes;
+            internal HashReader(Stream input, IncrementalHash[] hashes) { this.input = input; this.hashes = hashes; }
+            private int Append(ReadOnlySpan<byte> buffer, int read) { foreach (var hash in hashes) hash.AppendData(buffer.Slice(0, read)); return read; }
+            public override int Read(Span<byte> buffer) => Append(buffer, input.Read(buffer));
+            public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+            public override int ReadByte() { Span<byte> one = stackalloc byte[1]; return Read(one) == 0 ? -1 : one[0]; }
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken token = default)
+            { int read = await input.ReadAsync(buffer, token).ConfigureAwait(false); return Append(buffer.Span, read); }
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken token) => ReadAsync(buffer.AsMemory(offset, count), token).AsTask();
+            internal async Task DrainAsync()
+            {
+                byte[] buffer = ArrayPool<byte>.Shared.Rent(81920);
+                try { while (await ReadAsync(buffer.AsMemory(), OperationScope.Cancellation).ConfigureAwait(false) != 0) { } }
+                finally { ArrayPool<byte>.Shared.Return(buffer, true); }
+            }
+            public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false;
             public override long Length => throw new NotSupportedException(); public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
-            public override void Flush() => output.Flush(); public override int Read(byte[] b, int o, int c) => throw new NotSupportedException();
+            public override void Flush() { } public override void Write(byte[] b, int o, int c) => throw new NotSupportedException();
             public override long Seek(long o, SeekOrigin s) => throw new NotSupportedException(); public override void SetLength(long v) => throw new NotSupportedException();
         }
     }

@@ -46,26 +46,31 @@ namespace Egelke.EHealth.Etee.Crypto
         protected virtual async Task<UnsealResult> UnsealCoreAsync(Stream data, WebKey sender, SecretKey key)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
-            using var envelope = new CryptoSpool(CryptoSpool.Remaining(data));
-            var outer = await NativeStreamingCms.ReadAsync(data, envelope).ConfigureAwait(false);
-            var outerStatus = await VerifyCoreAsync(outer.Metadata, sender, null, timemark, outer.Verify).ConfigureAwait(false);
-            envelope.Position = 0;
-            using var encrypted = NativeEnvelope.OpenDecryption(envelope, encryptionCertificates, ownKeys, key, outerStatus.SigningTime ?? DateTime.UtcNow);
-            var encryptionStatus = new SecurityInformation { SubjectId = encrypted.KeyId };
-            if (encrypted.Certificate != null)
-                encryptionStatus.Subject = await encrypted.Certificate.VerifyAsync(outerStatus.SigningTime ?? DateTime.UtcNow, new[] { 2, 3 }, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey, authenticationCertificates, null, null).ConfigureAwait(false);
-            else if (encrypted.KeySize < (key != null ? EteeActiveConfig.Unseal.MinimumEncryptionKeySize.SymmetricRecipientKey : EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey))
-                encryptionStatus.securityViolations.Add(SecurityViolation.NotAllowedEncryptionKeySize);
-            var clear = new CryptoSpool(envelope.Length);
+            var clear = new CryptoSpool(CryptoSpool.Remaining(data));
+            NativeEnvelope.Decryption encrypted = null;
             try
             {
-                var inner = await NativeStreamingCms.ReadAsync(encrypted.Content, clear).ConfigureAwait(false);
-                encrypted.Complete();
+                NativeStreamingCms.Parsed inner = null;
+                var outer = await NativeStreamingCms.ReadAsync(data, async envelope =>
+                {
+                    encrypted = NativeEnvelope.OpenDecryption(envelope, encryptionCertificates, ownKeys, key);
+                    inner = await NativeStreamingCms.ReadAsync(encrypted.Content, clear).ConfigureAwait(false);
+                    encrypted.Complete();
+                }).ConfigureAwait(false);
+                var outerStatus = await VerifyCoreAsync(outer.Metadata, sender, null, timemark, outer.Verify).ConfigureAwait(false);
+                DateTime time = outerStatus.SigningTime ?? DateTime.UtcNow;
+                var certificate = encrypted.SelectCertificate(time);
+                var encryptionStatus = new SecurityInformation { SubjectId = encrypted.KeyId };
+                if (certificate != null)
+                    encryptionStatus.Subject = await certificate.VerifyAsync(time, new[] { 2, 3 }, EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey, authenticationCertificates, null, null).ConfigureAwait(false);
+                else if (encrypted.KeySize < (key != null ? EteeActiveConfig.Unseal.MinimumEncryptionKeySize.SymmetricRecipientKey : EteeActiveConfig.Unseal.MinimumEncryptionKeySize.AsymmerticRecipientKey))
+                    encryptionStatus.securityViolations.Add(SecurityViolation.NotAllowedEncryptionKeySize);
                 var innerStatus = await VerifyCoreAsync(inner.Metadata, sender, outerStatus, timemark, inner.Verify).ConfigureAwait(false);
                 clear.Position = 0;
                 return new UnsealResult { UnsealedData = clear, SecurityInformation = new UnsealSecurityInformation { OuterSignature = outerStatus, Encryption = encryptionStatus, InnerSignature = innerStatus } };
             }
             catch { clear.Dispose(); throw; }
+            finally { encrypted?.Dispose(); }
         }
         public SignatureSecurityInformation Verify(Stream data) => VerifyAsync(data).GetAwaiter().GetResult();
         public SignatureSecurityInformation Verify(Stream data, WebKey sender) => VerifyAsync(data, sender).GetAwaiter().GetResult();
