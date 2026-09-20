@@ -85,8 +85,23 @@ namespace Egelke.EHealth.Client.Pki
     public sealed class OperationPolicy
     {
         private readonly SemaphoreSlim admission;
-        /// <summary>Shared process-wide policy. Configure a shared application policy for the measured task capacity.</summary>
-        public static OperationPolicy Default { get; } = new OperationPolicy(16, TimeSpan.FromMinutes(1));
+        private static OperationPolicy defaultPolicy = new OperationPolicy(4, TimeSpan.FromMinutes(1));
+        /// <summary>Shared process-wide policy, initially four operations with a one-minute deadline.</summary>
+        /// <remarks>
+        /// Configure this at application startup. Clients without an explicit policy use the current default.
+        /// Replacing it does not cancel or migrate operations already running or queued on the previous policy.
+        /// </remarks>
+        public static OperationPolicy Default
+        {
+            get => Volatile.Read(ref defaultPolicy);
+            set
+            {
+                ArgumentNullException.ThrowIfNull(value);
+                Volatile.Write(ref defaultPolicy, value);
+            }
+        }
+        /// <summary>Maximum number of complete operations admitted concurrently by this policy.</summary>
+        public int MaximumConcurrency { get; }
         /// <summary>Maximum duration, including time spent awaiting admission.</summary>
         public TimeSpan Timeout { get; }
         /// <summary>Creates a policy. Nested library calls retain the outer admission slot.</summary>
@@ -94,7 +109,8 @@ namespace Egelke.EHealth.Client.Pki
         {
             if (maximumConcurrency < 1) throw new ArgumentOutOfRangeException(nameof(maximumConcurrency));
             if (timeout <= TimeSpan.Zero || timeout.TotalMilliseconds > int.MaxValue) throw new ArgumentOutOfRangeException(nameof(timeout));
-            admission = new SemaphoreSlim(maximumConcurrency, maximumConcurrency); Timeout = timeout;
+            admission = new SemaphoreSlim(maximumConcurrency, maximumConcurrency);
+            MaximumConcurrency = maximumConcurrency; Timeout = timeout;
         }
         /// <summary>Runs a complete operation with cancellation and a deadline.</summary>
         public async Task<T> RunAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken = default)

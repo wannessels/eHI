@@ -15,7 +15,8 @@ internal static class CryptoProfiles
 {
     // Run alone in a fresh process to compare process peak RSS without contamination
     // from earlier payload sizes or the other backend.
-    internal static Task NativeMemoryAsync(int payloadMiB = 8) => RoundTripAsync(checked(payloadMiB * 1024 * 1024), 1024 * 1024, "isolated-memory", true);
+    internal static Task NativeMemoryAsync(int payloadMiB = 8, int? thresholdMiB = null) => RoundTripAsync(checked(payloadMiB * 1024 * 1024),
+        thresholdMiB.HasValue ? (long)thresholdMiB.Value * 1024 * 1024 : Settings.Default.InMemorySize, "isolated-memory", true);
 
     internal static byte[] Sign(ISignatureFactory factory, byte[] data)
     {
@@ -45,10 +46,11 @@ internal static class CryptoProfiles
                 }
             }
         }
+        long defaultThreshold = Settings.Default.InMemorySize;
         foreach (bool native in new[] { true, false })
         {
             foreach (int size in new[] { 32 * 1024, 1024 * 1024, 1024 * 1024 + 1, 8 * 1024 * 1024 })
-                await RoundTripAsync(size, 1024 * 1024, "default-threshold", native);
+                await RoundTripAsync(size, defaultThreshold, "default-threshold", native);
             foreach (int size in new[] { 1024 * 1024, 1024 * 1024 + 1, 8 * 1024 * 1024 })
                 await RoundTripAsync(size, 64 * 1024 * 1024, "memory-threshold", native);
         }

@@ -6,7 +6,7 @@ param(
     [ValidateRange(1, 10000)][int]$Requests = 32,
     [ValidateRange(1, 16)][int]$CpuLimit = 1,
     [ValidateRange(1, 64)][int]$MemoryGiB = 1,
-    [ValidateRange(0, 1024)][int]$ThresholdMiB = 1,
+    [ValidateRange(0, 1024)][int]$ThresholdMiB = 16,
     [switch]$Quick,
     [switch]$ServerGC,
     [switch]$DisableTiering
@@ -17,11 +17,11 @@ $profileOutput = Join-Path $profileRepo 'artifacts\profiling'
 New-Item -ItemType Directory -Force -Path $profileOutput | Out-Null
 $profileCommit = git -C $profileRepo rev-parse HEAD
 $profileName = "backends-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' })
-if ($Suite -eq 'native-memory') { $profileName = "native-streaming-$($PayloadMiB)mib-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
+if ($Suite -eq 'native-memory') { $profileName = "native-streaming-$($PayloadMiB)mib-t$ThresholdMiB-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
 if ($Suite -eq 'crypto-concurrency') { $profileName = "crypto-$($PayloadKiB)kib-c$Concurrency-t$ThresholdMiB-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
 if ($ServerGC) { $profileName += '-server' }
 $profileArguments = '--suite ' + $Suite + ' --output /out/' + $profileName + '.json'
-if ($Suite -eq 'native-memory') { $profileArguments += ' --payload-mib ' + $PayloadMiB }
+if ($Suite -eq 'native-memory') { $profileArguments += " --payload-mib $PayloadMiB --threshold-mib $ThresholdMiB" }
 if ($Suite -eq 'crypto-concurrency') { $profileArguments += " --payload-kib $PayloadKiB --concurrency $Concurrency --requests $Requests --threshold-mib $ThresholdMiB" }
 if ($Quick) { $profileArguments += ' --quick' }
 $profileCommand = 'cp -a /src /tmp/eHI && cd /tmp/eHI && dotnet build benchmarks/benchmarks.csproj -c Release -p:SignAssembly=false --source https://api.nuget.org/v3/index.json -v quiet > /out/' + $profileName + '-build.log 2>&1 && dotnet benchmarks/bin/Release/net8.0/benchmarks.dll ' + $profileArguments + ' > /out/' + $profileName + '.log 2>&1'

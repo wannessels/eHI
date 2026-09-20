@@ -30,8 +30,14 @@ namespace Egelke.EHealth.Client.Services
     {
         protected readonly ILogger<ServiceClient<Port>> _logger;
 
-        /// <summary>Shared admission and deadline policy for complete service calls.</summary>
-        public OperationPolicy OperationPolicy { get; set; } = OperationPolicy.Default;
+        private OperationPolicy operationPolicy;
+        /// <summary>Admission and deadline policy for complete service calls; follows the shared default unless overridden.</summary>
+        /// <remarks>Assign null to return to the shared default. Configure policies before starting requests.</remarks>
+        public OperationPolicy OperationPolicy
+        {
+            get => Volatile.Read(ref operationPolicy) ?? Egelke.EHealth.Client.Pki.OperationPolicy.Default;
+            set => Volatile.Write(ref operationPolicy, value);
+        }
 
         protected Task<T> RunOperationAsync<T>(Func<Task<T>> operation, CancellationToken cancellationToken)
             => OperationPolicy.RunAsync(_ => operation(), cancellationToken);

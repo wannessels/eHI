@@ -2,22 +2,18 @@
 
 Native sealing now processes the input once, piping the inner signed message directly through AES encryption and outer signing. This removes the inner/encrypted temporary files and supports async-only, non-seekable input without replay. Outer-signature retries reuse the digest. Unsealing feeds decrypted bytes directly into inner verification/output, removing another temporary stage while preserving certificate selection using the validated outer signing time. Payload copies and native temporary-file I/O are asynchronous. Memory streams reserve known sizes plus modest CMS overhead to avoid repeated growth copies.
 
-For the tested 32 KiB/8 MiB workload, start with **four active crypto-heavy operations** and a **16 MiB per-stream threshold** on the requested 4-vCPU/16-GiB task. Larger messages still spill to temporary files. The library's portable defaults remain unchanged; apply the settings at application startup, before creating contexts:
+For the tested 32 KiB/8 MiB workload, **four active operations** and a **16 MiB per-stream threshold** gave a useful balance on the requested 4-vCPU/16-GiB task. These are now the library defaults, with a one-minute deadline; no startup assignment is necessary. Larger messages still spill to temporary files. To override the settings at application startup:
 
 ```csharp
 using Egelke.EHealth.Client.Pki;
 using Egelke.EHealth.Etee.Crypto.Configuration;
 
 Settings.Default.UseNativeCrypto = true;
-Settings.Default.InMemorySize = 16L * 1024 * 1024;
-
-// Register/reuse ONE instance for clients sharing the same capacity budget.
-var policy = new OperationPolicy(4, TimeSpan.FromMinutes(1));
-mda.OperationPolicy = policy;
-kgss.OperationPolicy = policy;
+Settings.Default.InMemorySize = 32L * 1024 * 1024;
+OperationPolicy.Default = new OperationPolicy(8, TimeSpan.FromSeconds(45));
 ```
 
-Standalone crypto workflows can use the same policy's `RunAsync` around the complete workflow. Creating a policy per request does not provide a shared limit. The one-minute timeout above preserves the library default; set it to the application's deadline if different.
+Unconfigured clients and standalone crypto calls share the default policy. To give a group of clients an independent budget, assign one custom policy instance to their `OperationPolicy` properties; assigning null restores use of the global default. Creating a policy per request does not provide a shared limit. Configure at startup, since changing the global policy does not migrate existing active/queued operations. The comparison tables below retain the explicitly measured thresholds and limits, including the previous 1 MiB default.
 
 The measurements cover crypto, not the entire remote service call. A workload dominated by HTTP/STS/TSA waits may benefit from more end-to-end operations. Size that limit using actual service latency and arrival rate; these closed-loop results do not measure an overloaded incoming-request queue.
 

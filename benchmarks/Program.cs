@@ -40,14 +40,15 @@ internal static class Program
             if (suite == "native-memory")
             {
                 int sizeIndex = Array.IndexOf(args, "--payload-mib");
-                await CryptoProfiles.NativeMemoryAsync(sizeIndex < 0 ? 8 : int.Parse(args[sizeIndex + 1]));
+                int thresholdIndex = Array.IndexOf(args, "--threshold-mib");
+                await CryptoProfiles.NativeMemoryAsync(sizeIndex < 0 ? 8 : int.Parse(args[sizeIndex + 1]), thresholdIndex < 0 ? null : int.Parse(args[thresholdIndex + 1]));
             }
             if (suite is "all" or "memory") await MemoryProfiles.RunAsync();
             if (suite is "all" or "http") httpDetails = await HttpProfiles.RunAsync();
             if (suite == "crypto-concurrency")
             {
                 int Option(string name, int fallback) { int index = Array.IndexOf(args, name); return index < 0 ? fallback : int.Parse(args[index + 1]); }
-                concurrencyDetails = await ConcurrentCryptoProfiles.RunAsync(Option("--payload-kib", 8192) * 1024, Option("--concurrency", 4), Option("--requests", Quick ? 8 : 32), Option("--threshold-mib", 1));
+                concurrencyDetails = await ConcurrentCryptoProfiles.RunAsync(Option("--payload-kib", 8192) * 1024, Option("--concurrency", 4), Option("--requests", Quick ? 8 : 32), Option("--threshold-mib", 16));
             }
         }
         finally

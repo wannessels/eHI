@@ -8,21 +8,23 @@ Dispose directly held factory-created sealers/unsealers after active operations 
 
 Native signing, encryption, verification, decryption and completion stream payloads. `InMemorySize` controls when each native stage spills to disk; known large stages start on disk. Native metadata decoding has a separate 16 MiB-per-layer default limit (`MaximumNativeMetadataSize`). Keep admission limits appropriate to the task's memory and temporary-storage budget. See the [streaming measurements](native-streaming-performance.md): allocation fell substantially, with a latency cost in the local profile. The [earlier allocation reductions](native-memory-improvements.md) describe the previous buffered implementation.
 
-Native sealing now pipelines the nested CMS layers in one pass, eliminating its intermediate files and input replay. Unsealing decrypts directly into inner verification/output, removing another temporary stage. Payload I/O is asynchronous. Shared signer-key locks cover only the provider signature/verification call; hashing, encryption, copying and network validation do not hold those locks. Admission remains shared and bounded; the default limit has not been raised.
+Native sealing now pipelines the nested CMS layers in one pass, eliminating its intermediate files and input replay. Unsealing decrypts directly into inner verification/output, removing another temporary stage. Payload I/O is asynchronous. Shared signer-key locks cover only the provider signature/verification call; hashing, encryption, copying and network validation do not hold those locks.
 
-For the measured 4-vCPU/16-GiB target, the [latency/concurrency tuning guide](fargate-latency-tuning.md) recommends starting with a 16 MiB stream threshold and four active crypto-heavy operations. It includes startup configuration, unchanged-default comparisons, Server-GC results and the limits of the component benchmark.
+The defaults are now a **16 MiB per-stream threshold**, **four shared complete operations**, and a **one-minute deadline**. The [latency/concurrency tuning guide](fargate-latency-tuning.md) contains the measurements for the 4-vCPU/16-GiB target, Server-GC results, and benchmark limits. All three values remain configurable.
 ## Admission, cancellation and caching
 
-Use one shared policy for clients belonging to the same application capacity budget:
+No configuration is required to use the defaults. To override them for the application, configure once at startup:
 
 ```csharp
-var policy = new OperationPolicy(maximumConcurrency: 16, timeout: TimeSpan.FromSeconds(45));
-mda.OperationPolicy = policy;
-kgss.OperationPolicy = policy;
-var result = await mda.ConsultAsync(query, etee: true, cancellationToken: cancellationToken);
+Settings.Default.InMemorySize = 32L * 1024 * 1024;
+OperationPolicy.Default = new OperationPolicy(maximumConcurrency: 8, timeout: TimeSpan.FromSeconds(45));
 ```
 
-The default is 16 complete operations per process with a one-minute deadline. The deadline includes admission queueing, STS acquisition, encryption, the service request, and response verification. Nested library calls retain the outer admission slot. Tune concurrency and timeout using the application workload and container CPU/memory budget; these defaults are not a Fargate sizing recommendation.
+Service clients without an explicit override and standalone crypto/PKI entry points use the shared `OperationPolicy.Default`. Its `MaximumConcurrency` and `Timeout` properties expose the configured values. Clients resolve the default for each new call, including clients constructed before startup configuration is applied.
+
+To isolate a group of clients, assign the same custom policy instance to each client's `OperationPolicy` property. An explicit client policy is retained when the global default changes; assigning null restores the shared default. Configure policies before starting work: replacing the global policy does not cancel or migrate requests already running or queued on its predecessor, so replacing it under load can temporarily overlap the two admission budgets.
+
+The deadline includes admission queueing, STS acquisition, encryption, the service request, and response verification. Nested library calls retain the outer admission slot. Tune concurrency and timeout using the application's actual workload; the measurements do not include remote-service waiting time.
 
 Cancellation flows through built-in HTTP and WCF clients. Cancelling a WCF request aborts that client/channel: create a replacement client before another call. Concurrent revocation downloads and token refreshes share work; cancelling one waiter does not cancel other waiters, but the last cancelled waiter aborts the shared operation.
 

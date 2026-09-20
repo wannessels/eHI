@@ -55,10 +55,10 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         /// </summary>
         /// <value>
         /// <para>
-        /// The default value is 1048576 or 1MB.
+        /// The default value is 16777216 bytes (16 MiB). Configure this at application startup.
         /// </para>
         /// <para>
-        /// This setting isn't used for messages generated with the eHealth 1.6 version of the library.
+        /// This is a per-stream threshold, not a cap on total process memory.
         /// </para>
         /// </value>
         public long InMemorySize { get; set; }
@@ -96,7 +96,7 @@ namespace Egelke.EHealth.Etee.Crypto.Configuration
         private Settings()
         {
             TimestampGracePeriod = new TimeSpan(0, 5, 0);
-            InMemorySize = 1024 * 1024;
+            InMemorySize = 16L * 1024 * 1024;
             SignRetries = Environment.OSVersion.Platform == PlatformID.Win32NT ? 4 : 0;
         }
     }
