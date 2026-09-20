@@ -24,5 +24,6 @@ internal static class KeyProfiles
             return Task.CompletedTask;
         });
         await Program.MeasureAsync("keys", "sign-hash", hash.Length, 200, () => { rsa.SignHash(hash, HashAlgorithmName.SHA256, RSASignaturePadding.Pss); return Task.CompletedTask; });
+        await Program.MeasureAsync("keys", "sign-hash-fresh-handle", hash.Length, 200, () => { using var key = certificate.GetRSAPrivateKey(); key.SignHash(hash, HashAlgorithmName.SHA256, RSASignaturePadding.Pss); return Task.CompletedTask; });
     }
 }
