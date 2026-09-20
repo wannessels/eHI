@@ -64,7 +64,8 @@ namespace Egelke.EHealth.Etee.Crypto
             byte[] clear = NativeCms.Read(input);
             var inner = Sign(clear, signature);
             await CompleteCoreAsync(inner, signature, signature == authentication ? null : level & ~Level.T_Level).ConfigureAwait(false);
-            byte[] encrypted = NativeEnvelope.Encrypt(inner.Encode(), recipients, webKeys, key);
+            byte[] encrypted = NativeEnvelope.Encrypt(NativeCms.Attach(inner, clear).Encode(), recipients, webKeys, key);
+            clear = null; inner = null; // Do not retain plaintext CMS buffers while awaiting an outer timestamp.
             SignedCms outer = null;
             for (int retry = 0; ; retry++)
             {
@@ -74,7 +75,7 @@ namespace Egelke.EHealth.Etee.Crypto
                 { await Task.Delay((int)Math.Pow(10, retry + 1), OperationScope.Cancellation).ConfigureAwait(false); }
             }
             await CompleteCoreAsync(outer, authentication, level).ConfigureAwait(false);
-            return ToStream(outer.Encode());
+            return NativeCms.Attach(outer, encrypted).ToStream();
         }
         private SignedCms Sign(byte[] data, X509Certificate2 certificate)
             => certificate != null ? NativeCms.Sign(data, certificate, Key(certificate)) : NativeCms.Sign(data, null, ownWebKey.NativeKey, ownWebKey.Id);
@@ -97,9 +98,9 @@ namespace Egelke.EHealth.Etee.Crypto
         protected virtual async Task<TimemarkedResult<Stream>> CompleteMessageAsync(Stream data)
         {
             ObjectDisposedException.ThrowIf(disposed != 0, this);
-            var cms = NativeCms.Decode(NativeCms.Read(data));
-            var key = await CompleteCoreAsync(cms, null, level).ConfigureAwait(false);
-            return new TimemarkedResult<Stream>(ToStream(cms.Encode()), key);
+            var detached = NativeCms.Detach(NativeCms.Read(data));
+            var key = await CompleteCoreAsync(detached.Metadata, null, level).ConfigureAwait(false);
+            return new TimemarkedResult<Stream>(NativeCms.Attach(detached.Metadata, detached.Content).ToStream(), key);
         }
         // Operates on signature metadata only. The streaming backend supplies detached CMS,
         // so chain building and unsigned-attribute updates never buffer the payload here.
@@ -150,14 +151,6 @@ namespace Egelke.EHealth.Etee.Crypto
                 NativeCms.SetUnsigned(signer, CryptoEncoding.RevocationAttribute, NativeCms.EncodeRevocationValues(evidence.Crls, evidence.Ocsps));
             }
             return key;
-        }
-        private static Stream ToStream(byte[] value)
-        {
-            OperationScope.Cancellation.ThrowIfCancellationRequested();
-            if (value.Length <= Settings.Default.InMemorySize) return new MemoryStream(value, false);
-            var stream = new TempFileStreamFactory().CreateNew();
-            try { using var input = new MemoryStream(value, false); OperationScope.Copy(input, stream); stream.Position = 0; return stream; }
-            catch { stream.Dispose(); throw; }
         }
     }
 }

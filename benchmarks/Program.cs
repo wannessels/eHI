@@ -36,6 +36,7 @@ internal static class Program
         try
         {
             if (suite is "all" or "crypto") await CryptoProfiles.RunAsync();
+            if (suite == "native-memory") await CryptoProfiles.NativeMemoryAsync();
             if (suite is "all" or "memory") await MemoryProfiles.RunAsync();
             if (suite is "all" or "http") httpDetails = await HttpProfiles.RunAsync();
         }

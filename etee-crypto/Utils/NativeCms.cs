@@ -114,9 +114,63 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             { PrivateKey = key, DigestAlgorithm = new Oid(CryptoEncoding.Sha256), IncludeOption = X509IncludeOption.None };
             if (key is RSA) signer.SignaturePadding = RSASignaturePadding.Pss;
             signer.SignedAttributes.Add(new Pkcs9SigningTime(DateTime.UtcNow));
-            var cms = new SignedCms(new ContentInfo(data), false);
+            // Detached CMS keeps repeated platform encodes (signing, certificates and
+            // unsigned attributes) proportional to metadata rather than payload size.
+            var cms = new SignedCms(new ContentInfo(data), true);
             lock (key) cms.ComputeSignature(signer, true);
             return cms;
+        }
+        internal static DerSegments Attach(SignedCms detached, ReadOnlyMemory<byte> content)
+        {
+            if (!detached.Detached) throw new ArgumentException("Expected detached signature metadata", nameof(detached));
+            return Attach(detached.Encode(), content);
+        }
+        private static DerSegments Attach(byte[] encoded, ReadOnlyMemory<byte> content)
+        {
+            var top = CryptoEncoding.Sequence(encoded);
+            var type = top.ReadEncodedValue();
+            var explicitValue = top.ReadSequence(CryptoEncoding.Context(0));
+            var signed = explicitValue.ReadSequence();
+            var version = signed.ReadEncodedValue(); var algorithms = signed.ReadEncodedValue();
+            var encapsulated = signed.ReadSequence(); var contentType = encapsulated.ReadEncodedValue(); encapsulated.ThrowIfNotEmpty();
+            var fields = new List<DerSegments>
+            {
+                DerSegments.Encoded(version), DerSegments.Encoded(algorithms),
+                DerSegments.Constructed(0x30, DerSegments.Encoded(contentType), DerSegments.Constructed(0xA0, DerSegments.Value(0x04, content)))
+            };
+            while (signed.HasData) fields.Add(DerSegments.Encoded(signed.ReadEncodedValue()));
+            explicitValue.ThrowIfNotEmpty(); top.ThrowIfNotEmpty();
+            return DerSegments.Constructed(0x30, DerSegments.Encoded(type), DerSegments.Constructed(0xA0, DerSegments.Constructed(0x30, fields.ToArray())));
+        }
+        internal static (SignedCms Metadata, ReadOnlyMemory<byte> Content) Detach(byte[] encoded)
+        {
+            try
+            {
+                var top = CryptoEncoding.Sequence(encoded, AsnEncodingRules.BER);
+                var type = top.ReadEncodedValue();
+                var explicitValue = top.ReadSequence(CryptoEncoding.Context(0));
+                var signed = explicitValue.ReadSequence();
+                var version = signed.ReadEncodedValue(); var algorithms = signed.ReadEncodedValue();
+                var encapsulated = signed.ReadSequence(); var contentType = encapsulated.ReadEncodedValue();
+                var contentWrapper = encapsulated.ReadSequence(CryptoEncoding.Context(0));
+                if (!contentWrapper.TryReadPrimitiveOctetString(out ReadOnlyMemory<byte> content)) content = contentWrapper.ReadOctetString();
+                contentWrapper.ThrowIfNotEmpty(); encapsulated.ThrowIfNotEmpty();
+                var fields = new List<DerSegments>
+                {
+                    DerSegments.Encoded(version), DerSegments.Encoded(algorithms),
+                    DerSegments.Constructed(0x30, DerSegments.Encoded(contentType))
+                };
+                while (signed.HasData) fields.Add(DerSegments.Encoded(signed.ReadEncodedValue()));
+                explicitValue.ThrowIfNotEmpty(); top.ThrowIfNotEmpty();
+                var metadataBytes = DerSegments.Constructed(0x30, DerSegments.Encoded(type),
+                    DerSegments.Constructed(0xA0, DerSegments.Constructed(0x30, fields.ToArray()))).Encode();
+                var cms = new SignedCms(new ContentInfo(Array.Empty<byte>()), true); cms.Decode(metadataBytes);
+                if (cms.ContentInfo.ContentType.Value != CryptoEncoding.Data || new AsnReader(contentType, AsnEncodingRules.BER).ReadObjectIdentifier() != CryptoEncoding.Data)
+                    throw new InvalidMessageException("Unexpected signed content type");
+                return (cms, content);
+            }
+            catch (Exception error) when (error is CryptographicException || error is AsnContentException)
+            { throw new InvalidMessageException("Invalid CMS signed message", error); }
         }
         internal static (List<CertificateRevocationList> Crls, List<OcspResponse> Ocsps) RevocationValues(SignerInfo signer)
         {
@@ -174,23 +228,17 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 if (recipients.Count == 0) throw new ArgumentException("At least one recipient is required");
                 OperationScope.Cancellation.ThrowIfCancellationRequested();
                 var encrypted = aes.EncryptCbc(content, aes.IV, PaddingMode.PKCS7);
-                var writer = new AsnWriter(AsnEncodingRules.DER);
-                using (writer.PushSequence())
-                {
-                    writer.WriteObjectIdentifier(CryptoEncoding.EnvelopedData);
-                    using (writer.PushSequence(CryptoEncoding.Context(0))) using (writer.PushSequence())
-                    {
-                        writer.WriteInteger(secret == null && (webKeys == null || webKeys.Length == 0) ? 0 : 2);
-                        using (writer.PushSetOf()) foreach (var recipient in recipients) writer.WriteEncodedValue(recipient);
-                        using (writer.PushSequence())
-                        {
-                            writer.WriteObjectIdentifier(CryptoEncoding.Data);
-                            using (writer.PushSequence()) { writer.WriteObjectIdentifier(Aes128Cbc); writer.WriteOctetString(aes.IV); }
-                            writer.WriteOctetString(encrypted, CryptoEncoding.Context(0, false));
-                        }
-                    }
-                }
-                return writer.Encode();
+                var type = new AsnWriter(AsnEncodingRules.DER); type.WriteObjectIdentifier(CryptoEncoding.EnvelopedData);
+                var version = new AsnWriter(AsnEncodingRules.DER); version.WriteInteger(secret == null && (webKeys == null || webKeys.Length == 0) ? 0 : 2);
+                var recipientSet = new AsnWriter(AsnEncodingRules.DER);
+                using (recipientSet.PushSetOf()) foreach (var recipient in recipients) recipientSet.WriteEncodedValue(recipient);
+                var contentType = new AsnWriter(AsnEncodingRules.DER); contentType.WriteObjectIdentifier(CryptoEncoding.Data);
+                var algorithm = new AsnWriter(AsnEncodingRules.DER);
+                using (algorithm.PushSequence()) { algorithm.WriteObjectIdentifier(Aes128Cbc); algorithm.WriteOctetString(aes.IV); }
+                return DerSegments.Constructed(0x30, DerSegments.Encoded(type.Encode()), DerSegments.Constructed(0xA0,
+                    DerSegments.Constructed(0x30, DerSegments.Encoded(version.Encode()), DerSegments.Encoded(recipientSet.Encode()),
+                        DerSegments.Constructed(0x30, DerSegments.Encoded(contentType.Encode()), DerSegments.Encoded(algorithm.Encode()),
+                            DerSegments.Value(0x80, encrypted))))).Encode();
             }
             finally { CryptographicOperations.ZeroMemory(key); }
         }
@@ -227,7 +275,11 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
             var algorithm = CryptoEncoding.ReadAlgorithm(info);
             int aesBits = algorithm.Oid switch { Aes128Cbc => 128, "2.16.840.1.101.3.4.1.22" => 192, "2.16.840.1.101.3.4.1.42" => 256, _ => throw new InvalidMessageException("Unsupported content encryption algorithm") };
             var ivReader = new AsnReader(algorithm.Parameters, AsnEncodingRules.DER); byte[] iv = ivReader.ReadOctetString(); ivReader.ThrowIfNotEmpty();
-            byte[] encrypted = info.ReadOctetString(CryptoEncoding.Context(0, false)); info.ThrowIfNotEmpty();
+            // DER ciphertext can be decrypted directly from its containing message. BER
+            // constructed octet strings (streaming senders) still need to be flattened.
+            if (!info.TryReadPrimitiveOctetString(out ReadOnlyMemory<byte> encrypted, CryptoEncoding.Context(0, false)))
+                encrypted = info.ReadOctetString(CryptoEncoding.Context(0, false));
+            info.ThrowIfNotEmpty();
             if (envelope.HasData) throw new InvalidMessageException("Unsupported envelope attributes"); wrapper.ThrowIfNotEmpty(); root.ThrowIfNotEmpty();
             byte[] key = null; var result = new Decryption();
             try
@@ -267,7 +319,7 @@ namespace Egelke.EHealth.Etee.Crypto.Utils
                 if (key.Length * 8 != aesBits || iv.Length != 16) throw new InvalidMessageException("Invalid AES parameters");
                 OperationScope.Cancellation.ThrowIfCancellationRequested();
                 using var aes = Aes.Create(); aes.Key = key;
-                result.Content = aes.DecryptCbc(encrypted, iv, PaddingMode.PKCS7); return result;
+                result.Content = aes.DecryptCbc(encrypted.Span, iv, PaddingMode.PKCS7); return result;
             }
             finally { if (key != null) CryptographicOperations.ZeroMemory(key); }
         }

@@ -133,6 +133,29 @@ public class CryptoBackendTests
         finally { (verifier as IDisposable)?.Dispose(); }
     }
 
+    [Fact]
+    public async Task NativeFramingPreservesPayloadAtLengthAndPaddingBoundaries()
+    {
+        using var rsa = RSA.Create(2048); var sender = new WebKey(rsa);
+        byte[] kek = RandomNumberGenerator.GetBytes(16); var secret = new SecretKey(new byte[] { 1 }, kek);
+        var sealer = new DataSealerFactory(NullLoggerFactory.Instance, true).Create(Level.B_Level, sender);
+        long previousThreshold = Settings.Default.InMemorySize;
+        try
+        {
+            // Force direct file output, including for short DER lengths and AES padding boundaries.
+            Settings.Default.InMemorySize = 0;
+            foreach (int size in new[] { 1, 15, 16, 17, 127, 128, 255, 256, 65535, 65536 })
+            {
+                byte[] data = RandomNumberGenerator.GetBytes(size);
+                using var input = new MemoryStream(data); using var output = await sealer.SealAsync(input, secret, Array.Empty<EncryptionToken>());
+                Assert.False(output is MemoryStream);
+                using var copy = new MemoryStream(); output.CopyTo(copy);
+                Assert.Equal(data, NativeRsaPssTests.BouncyUnseal(copy.ToArray(), rsa, kek));
+            }
+        }
+        finally { Settings.Default.InMemorySize = previousThreshold; (sealer as IDisposable)?.Dispose(); }
+    }
+
     [Theory]
     [InlineData(true)] [InlineData(false)]
     public async Task CancellationStopsSealingAndNonSeekableInputsWork(bool native)

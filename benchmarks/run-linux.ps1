@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('all', 'crypto', 'memory', 'http')][string]$Suite = 'all',
+    [ValidateSet('all', 'crypto', 'memory', 'http', 'native-memory')][string]$Suite = 'all',
     [switch]$Quick,
     [switch]$DisableTiering
 )

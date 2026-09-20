@@ -48,7 +48,7 @@ System trust remains the default. Applications needing explicit private trust an
 
 ## Memory behavior
 
-.NET `SignedCms` works with complete message buffers. In native mode, outputs above `Settings.Default.InMemorySize` are stored in temporary files, but that threshold **does not cap internal CMS memory**. Native input lengths beyond the platform's signed 32-bit buffer limit are rejected.
+.NET `SignedCms` works with complete message buffers. Native signing and completion now keep payloads outside CMS metadata, avoiding repeated payload encodes while certificates and timestamps are added. Final envelopes are written directly to a temporary file above `Settings.Default.InMemorySize`, and DER ciphertext is decrypted without first copying it out of its envelope. Native mode still buffers inputs and intermediate data, so that threshold **does not cap internal CMS memory**. Native input lengths beyond the platform's signed 32-bit buffer limit are rejected.
 
 BouncyCastle mode streams payloads through signatures and encryption, using temporary intermediate files above the threshold. Only detached signature metadata (including certificates and revocation evidence) passes through the shared platform CMS policy. Non-seekable inputs are first spooled to a temporary file. Legacy signatures without signed attributes require buffered BouncyCastle verification; newly sealed messages always include signed attributes. The threshold is a buffering choice, not a hard bound on process memory. Keep admission limits in place and measure large-payload concurrency before deployment.
 

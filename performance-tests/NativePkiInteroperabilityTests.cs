@@ -101,7 +101,9 @@ public class NativePkiInteroperabilityTests
                 byte[] originalSignature = signed.SignerInfos[0].GetSignature();
                 signed.RemoveCertificate(rootCert); // The completer must not duplicate the remaining signer certificate.
                 using var source = new MemoryStream(signed.Encode());
-                var completer = new DataCompleterFactory(NullLoggerFactory.Instance, native).Create(level, new LocalTimestampProvider(tsa, tsaKey, root));
+                // Completion must preserve both DER (native) and BER streamed payloads,
+                // including when the completing backend differs from the original sender.
+                var completer = new DataCompleterFactory(NullLoggerFactory.Instance, !native).Create(level, new LocalTimestampProvider(tsa, tsaKey, root));
                 try { completed = await completer.CompleteAsync(source); }
                 finally { (completer as IDisposable)?.Dispose(); }
                 using var copy = new MemoryStream(); completed.CopyTo(copy); completed.Position = 0;
