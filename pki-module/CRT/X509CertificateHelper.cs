@@ -82,10 +82,12 @@ namespace Egelke.EHealth.Client.Pki
         /// <remarks>
         /// Enable on servers where all intermediates are provided via the extra store.
         /// </remarks>
-        public static bool DisableCertificateDownloads { get; set; } = false;
+        public static bool DisableCertificateDownloads { get => disableCertificateDownloads; set { disableCertificateDownloads = value; ChainCache.Clear(); } }
+        private static bool disableCertificateDownloads;
 
         /// <summary>Optional explicit trust anchors. Null uses the operating-system trust store. Configure before serving requests.</summary>
-        public static X509Certificate2Collection CustomTrustStore { get; set; }
+        public static X509Certificate2Collection CustomTrustStore { get => customTrustStore; set { customTrustStore = value; ChainCache.Clear(); } }
+        private static X509Certificate2Collection customTrustStore;
 
         /// <summary>
         /// Wrapper of the X509Chain, just for compatbility
@@ -103,6 +105,9 @@ namespace Egelke.EHealth.Client.Pki
                 throw new ArgumentException("validation can't occur in the future", "validationTime");
             }
 
+            string key = ChainCache.Key(cert, extraStore);
+            Chain cached = ChainCache.TryGet(key, validationTime);
+            if (cached != null) return cached;
             using (X509Chain x509Chain = new X509Chain())
             {
                 if (extraStore != null) x509Chain.ChainPolicy.ExtraStore.AddRange(extraStore);
@@ -132,7 +137,7 @@ namespace Egelke.EHealth.Client.Pki
                 {
                     chain.ChainElements.Add(new ChainElement(x509Element));
                 }
-
+                ChainCache.Put(key, chain);
                 return chain;
             }
         }

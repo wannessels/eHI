@@ -28,7 +28,7 @@ internal static class PharmacyProfiles
         await using var pki = await EHealthPki.StartAsync(prescribers, citizenCrlEntries, ehealthCrlEntries);
         X509CertificateHelper.CustomTrustStore = pki.Authorities;
         X509CertificateHelper.DisableCertificateDownloads = true;
-        RevocationCache.Clear();
+        RevocationCache.Clear(); ChainCache.Clear();
         var sealers = new DataSealerFactory(NullLoggerFactory.Instance, true);
         var unsealers = new DataUnsealerFactory(NullLoggerFactory.Instance, true);
         var pharmacySealer = sealers.Create(Level.B_Level, pki.Pharmacy);
@@ -75,7 +75,7 @@ internal static class PharmacyProfiles
             });
             long cold = Stopwatch.GetTimestamp(); await Request(); double coldMs = Stopwatch.GetElapsedTime(cold).TotalMilliseconds;
             var rounds = await ClosedLoop.RunAsync(concurrency, requests, Request,
-                () => new { CrlDownloads = Volatile.Read(ref pki.CrlDownloads), RevocationCacheEntries = RevocationCache.Count, RevocationCacheEstimatedBytes = RevocationCache.EstimatedSizeBytes });
+                () => new { CrlDownloads = Volatile.Read(ref pki.CrlDownloads), RevocationCacheEntries = RevocationCache.Count, RevocationCacheEstimatedBytes = RevocationCache.EstimatedSizeBytes, ChainCacheEntries = ChainCache.Count, ChainCacheHits = ChainCache.Hits, ChainCacheMisses = ChainCache.Misses });
             return new
             {
                 Method = "Closed-loop pharmacy workers: seal a request to Recip-e, unseal the Recip-e response, unseal the time-marked prescription with its KGSS key at LT level. Chains: root > government > eHealth-platform CA (pharmacy, Recip-e), root > Citizen CA (prescribers). CRLs from an in-process HTTP server, no OCSP responder, no live eHealth endpoints.",
