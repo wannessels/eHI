@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('all', 'crypto', 'memory', 'http', 'native-memory', 'crypto-concurrency', 'pharmacy', 'keys')][string]$Suite = 'all',
+    [ValidateSet('all', 'crypto', 'memory', 'http', 'native-memory', 'crypto-concurrency', 'pharmacy', 'keys', 'soap')][string]$Suite = 'all',
     [ValidateRange(1, 1024)][int]$PayloadMiB = 8,
     [ValidateRange(1, 1048576)][int]$PayloadKiB = 8192,
     [ValidateRange(1, 64)][int]$Concurrency = 4,
@@ -24,6 +24,7 @@ $profileName = "backends-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTi
 if ($Suite -eq 'native-memory') { $profileName = "native-streaming-$($PayloadMiB)mib-t$ThresholdMiB-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
 if ($Suite -eq 'crypto-concurrency') { $profileName = "crypto-$($PayloadKiB)kib-c$Concurrency-t$(if ($ThresholdMiB -lt 0) { 'default' } else { $ThresholdMiB })-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
 if ($Suite -eq 'keys') { $profileName = "keys-net8-$($CpuLimit)cpu-$($MemoryGiB)g" }
+if ($Suite -eq 'soap') { $profileName = "soap-net8-$($CpuLimit)cpu-$($MemoryGiB)g" }
 if ($Suite -eq 'pharmacy') { $profileName = "pharmacy-c$Concurrency-p$Prescribers-crl$CitizenCrlEntries$(if ($Backend -eq 'bouncycastle') { '-bc' } else { '' })-net8-$($CpuLimit)cpu-$($MemoryGiB)g" + $(if ($DisableTiering) { '-no-tiering' } else { '' }) }
 if ($ServerGC) { $profileName += '-server' }
 $profileArguments = '--suite ' + $Suite + ' --output /out/' + $profileName + '.json'

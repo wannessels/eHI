@@ -7,6 +7,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../etee-crypto/etee-crypto.csproj" />
+    <ProjectReference Include="../library-core/library-core.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="3.0.1" />
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.6.1" />
